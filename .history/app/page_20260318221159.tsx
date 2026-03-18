@@ -1,6 +1,4 @@
 "use client";
-// コメント部分の可読性向上のため、全体の背景を明るくし、
-// 投稿テキストもダークな色でシンプルに表示してください。
 
 import { useState } from "react";
 
@@ -27,7 +25,7 @@ export default function Home() {
           value={input}
           onChange={e => setInput(e.target.value)}
           placeholder="いまどうしてる？"
-          className="p-3 text-base rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white text-gray-900"
+          className="p-3 text-base rounded border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
         <button
           type="submit"
@@ -40,7 +38,7 @@ export default function Home() {
         {posts.map((post, idx) => (
           <li
             key={idx}
-            className="bg-white p-3 rounded border border-gray-300 text-gray-900 shadow"
+            className="bg-gray-50 p-3 rounded border border-gray-200"
           >
             {post}
           </li>
