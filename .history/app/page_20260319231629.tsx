@@ -10,41 +10,26 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 type Post = {
   id: number;
   content: string;
-  created_at?: string;
+  created_at: string;
 };
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const fetchPosts = async () => {
-    const { data, error } = await supabase
-      .from("posts")
-      .select("*");
-
-    if (error) {
-      setErrorMessage(error.message);
-      return;
-    }
-
-    if (data) {
-      setPosts(data as Post[]);
-    }
-    setErrorMessage(null);
-  };
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        await fetchPosts();
-      } catch (err) {
-        console.error("fetchPosts error:", err);
-        setErrorMessage("投稿一覧の取得に失敗しました。");
+    const fetchPosts = async () => {
+      const { data, error } = await supabase
+        .from("posts")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        setPosts(data as Post[]);
       }
     };
 
-    void run();
+    fetchPosts();
   }, []);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -58,15 +43,9 @@ export default function Home() {
       .select()
       .single();
 
-    if (error) {
-      console.error("insert error:", error);
-      setErrorMessage(error.message);
-      return;
-    }
-
-    if (data) {
+    if (!error && data) {
+      setPosts((prev) => [data as Post, ...prev]);
       setInput("");
-      await fetchPosts();
     }
   };
 
@@ -74,12 +53,6 @@ export default function Home() {
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
         <h1 className="mb-4 text-2xl font-semibold">Simple SNS</h1>
-
-        {errorMessage ? (
-          <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-            {errorMessage}
-          </div>
-        ) : null}
 
         <form
           onSubmit={handleSubmit}
