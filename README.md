@@ -1,6 +1,7 @@
 # heiwa-net
 
-心理的安全性が高く、攻撃的な言動が抑制されるSNSを目指すプロジェクト。
+いいね数もフォロワー数も表示しないSNS。  
+人を「数」で評価しない、新しいコミュニケーションの実験。
 
 ---
 
@@ -9,106 +10,57 @@
 heiwa-netは、現代のSNSにおける以下の課題に対する解決を目指します。
 
 - 誹謗中傷や人格攻撃が発生しやすい構造
+- 数字による評価や比較の圧力
 - 安心して発言できない環境
-- 建設的な対話が成立しにくい状況
 
-本プロジェクトは、単に「厳しく取り締まる」ことではなく、
+本プロジェクトは、
 
-> **攻撃的な言動が起こりにくく、またメリットを得にくい構造を設計すること**
+> **攻撃的な言動が起こりにくく、またメリットを得にくい構造**
 
-によって、安心して発言できる空間の実現を目指します。
+を設計することで、心理的安全性の高い空間の実現を目指します。
 
 ---
 
 ## ■ 設計思想（最重要）
 
-### 1. 心理的安全性の確保
-ユーザーが安心して発言できる環境を最優先とする。
+### 1. 人を数で評価しない
+いいね数・フォロワー数などの可視化された評価指標に依存しない。
 
 ### 2. 攻撃行動の構造的抑制
-暴言や差別を「罰する」だけでなく、
-それが起こりにくく、かつ得にならない設計を重視する。
+暴言や差別を「罰する」のではなく、
+それが拡散されず、メリットを持たない設計を行う。
 
-### 3. 信頼の維持
-ユーザーの信頼を長期的に維持できる一貫した設計と運用を行う。
+### 3. 心理的安全性の確保
+ユーザーが安心して発言できる環境を最優先とする。
 
-### 4. 建設的なコミュニケーション
-対立そのものを否定せず、意味のある対話へとつながる構造を目指す。
+### 4. 信頼の維持
+一貫した設計と運用により、長期的な信頼を築く。
 
 ---
 
 ## ■ 技術スタンス
 
-本プロジェクトにおいて、技術は手段であり目的ではない。
-
 - 最小構成から開始し、継続的に改善する
-- 技術選定は柔軟に行う
-- 実装よりも設計思想との整合性を優先する
+- 技術は手段であり、設計思想を優先する
 
 ---
 
 ## ■ 現在の状態
 
 - 最小構成の投稿機能を実装済み
-- ローカル環境で動作確認可能
-- UI/UXは未整備（今後改善予定）
-
----
-
-## ■ 今後の検討項目
-
-- 投稿データの永続化
-- モデレーション設計（通報・可視性制御など）
-- 不適切コンテンツの検出と扱い
-- ユーザー間の信頼形成メカニズム
-- UI/UXの改善
-
----
-
-## ■ 命名について
-
-「heiwa-net」は仮称です。  
-今後、より適した名称が見つかれば変更する可能性があります。
+- ローカルおよびWebで動作確認可能
+- UI/UXは未整備
 
 ---
 
 ## ■ このプロジェクトについて
 
-本プロジェクトは、収益化や独占を主目的としません。
-
-- 社会的インパクトの創出を重視
-- 模倣・改善・発展を歓迎
-- より良い実装が広がることを目指す
-
----
-
-## ■ English (Summary)
-
-heiwa-net is an experimental social network project focused on **psychological safety and constructive interaction**.
-
-Instead of relying solely on strict moderation, this project aims to:
-
-- Design systems where harmful behavior is less likely to occur
-- Reduce incentives for abusive or aggressive interactions
-- Encourage constructive and meaningful communication
-
-Core principles:
-
-- Prioritize psychological safety
-- Discourage harmful behavior structurally (not only by punishment)
-- Maintain long-term trust
-- Enable constructive dialogue, not just silence conflict
-
-This project values **design philosophy over technology**, and evolves incrementally from a minimal implementation.
+- 社会的インパクトの創出を目的とする
+- 模倣・改善・発展を歓迎する
+- 実験的に進化し続ける
 
 ---
 
 ## ■ License
 
 TBD
-
----
-
-## ■ Notes
-
-This document will evolve alongside the project.
