@@ -20,6 +20,9 @@ export default function Home() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
+    () => new Set()
+  );
 
   const fetchPosts = async () => {
     const { data, error } = await supabase
@@ -37,10 +40,30 @@ export default function Home() {
     setErrorMessage(null);
   };
 
+  const fetchLikes = async () => {
+    const { data, error } = await supabase
+      .from("likes")
+      .select("post_id")
+      .eq("user_id", DUMMY_USER_ID);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    const next = new Set<number>();
+    for (const row of data ?? []) {
+      if (typeof row.post_id === "number") next.add(row.post_id);
+      else if (row.post_id != null) next.add(Number(row.post_id));
+    }
+    setLikedPostIds(next);
+  };
+
   useEffect(() => {
     const run = async () => {
       try {
         await fetchPosts();
+        await fetchLikes();
       } catch (err) {
         console.error("fetchPosts error:", err);
         setErrorMessage("投稿一覧の取得に失敗しました。");
@@ -74,6 +97,30 @@ export default function Home() {
   };
 
   const handleLike = async (postId: number) => {
+    const liked = likedPostIds.has(postId);
+
+    if (liked) {
+      const { error } = await supabase
+        .from("likes")
+        .delete()
+        .eq("user_id", DUMMY_USER_ID)
+        .eq("post_id", postId);
+
+      if (error) {
+        console.error("unlike error:", error);
+        setErrorMessage(error.message);
+        return;
+      }
+
+      setErrorMessage(null);
+      setLikedPostIds((prev) => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+      return;
+    }
+
     const { error } = await supabase.from("likes").upsert(
       { user_id: DUMMY_USER_ID, post_id: postId },
       { onConflict: "user_id,post_id" }
@@ -82,9 +129,15 @@ export default function Home() {
     if (error) {
       console.error("like error:", error);
       setErrorMessage(error.message);
-    } else {
-      setErrorMessage(null);
+      return;
     }
+
+    setErrorMessage(null);
+    setLikedPostIds((prev) => {
+      const next = new Set(prev);
+      next.add(postId);
+      return next;
+    });
   };
 
   return (
@@ -127,13 +180,33 @@ export default function Home() {
               </div>
               <div className="mt-1 whitespace-pre-wrap">{post.content}</div>
               <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => void handleLike(post.id)}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-900 hover:bg-gray-50"
-                >
-                  いいね
-                </button>
+                {(() => {
+                  const liked = likedPostIds.has(post.id);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => void handleLike(post.id)}
+                      className={[
+                        "inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium transition-colors",
+                        liked
+                          ? "border-pink-300 bg-pink-50 text-pink-700"
+                          : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
+                      ].join(" ")}
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        className={liked ? "text-pink-600" : "text-gray-400"}
+                        aria-hidden="true"
+                      >
+                        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                      </svg>
+                      いいね
+                    </button>
+                  );
+                })()}
               </div>
             </li>
           ))}
