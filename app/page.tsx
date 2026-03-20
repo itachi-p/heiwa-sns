@@ -11,7 +11,10 @@ type Post = {
   id: number;
   content: string;
   created_at?: string;
+  user_id?: string;
 };
+
+const DUMMY_USER_ID = "11111111-1111-1111-1111-111111111111";
 
 export default function Home() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -54,7 +57,7 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from("posts")
-      .insert({ content })
+      .insert({ content, user_id: DUMMY_USER_ID })
       .select()
       .single();
 
@@ -67,6 +70,20 @@ export default function Home() {
     if (data) {
       setInput("");
       await fetchPosts();
+    }
+  };
+
+  const handleLike = async (postId: number) => {
+    const { error } = await supabase.from("likes").upsert(
+      { user_id: DUMMY_USER_ID, post_id: postId },
+      { onConflict: "user_id,post_id" }
+    );
+
+    if (error) {
+      console.error("like error:", error);
+      setErrorMessage(error.message);
+    } else {
+      setErrorMessage(null);
     }
   };
 
@@ -109,6 +126,15 @@ export default function Home() {
                 {post.created_at ? new Date(post.created_at).toLocaleString() : ""}
               </div>
               <div className="mt-1 whitespace-pre-wrap">{post.content}</div>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => void handleLike(post.id)}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-1 text-sm font-medium text-gray-900 hover:bg-gray-50"
+                >
+                  いいね
+                </button>
+              </div>
             </li>
           ))}
         </ul>
