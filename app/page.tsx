@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { validateNickname } from "@/lib/nickname";
 
 const supabase = createClient();
 
@@ -16,11 +17,18 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
+  /** 表示用（posts には保存せず users から解決） */
+  users?: { nickname: string | null } | null;
 };
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  /** プロフィール取得済みか */
+  const [profileReady, setProfileReady] = useState(false);
+  /** null = 未設定 → ニックネーム入力が必要 */
+  const [profileNickname, setProfileNickname] = useState<string | null>(null);
+  const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -29,6 +37,9 @@ export default function Home() {
   );
 
   const userId = user?.id ?? null;
+
+  const needsNickname =
+    Boolean(userId) && profileReady && profileNickname === null;
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
@@ -45,16 +56,51 @@ export default function Home() {
   }
 
   const fetchPosts = async () => {
-    const { data, error } = await supabase.from("posts").select("*");
+    const { data: rows, error } = await supabase
+      .from("posts")
+      .select("*")
+      .order("created_at", { ascending: false });
 
     if (error) {
       setErrorMessage(error.message);
       return;
     }
 
-    if (data) {
-      setPosts(data as Post[]);
+    const list = (rows ?? []) as Post[];
+    const authorIds = [
+      ...new Set(
+        list
+          .map((p) => p.user_id)
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+
+    const nickByUserId = new Map<string, string | null>();
+    if (authorIds.length > 0) {
+      const { data: profiles, error: profileError } = await supabase
+        .from("users")
+        .select("id, nickname")
+        .in("id", authorIds);
+
+      if (profileError) {
+        setErrorMessage(profileError.message);
+        return;
+      }
+      for (const row of profiles ?? []) {
+        nickByUserId.set(row.id, row.nickname);
+      }
     }
+
+    const merged: Post[] = list.map((p) => ({
+      ...p,
+      users: {
+        nickname: p.user_id
+          ? (nickByUserId.get(p.user_id) ?? null)
+          : null,
+      },
+    }));
+
+    setPosts(merged);
     setErrorMessage(null);
   };
 
@@ -103,10 +149,52 @@ export default function Home() {
     }
   }, []);
 
+  /** ログイン後: users 行の確保 → nickname 取得 */
   useEffect(() => {
-    if (!userId || !user) return;
+    if (!userId || !user) {
+      startTransition(() => {
+        setProfileReady(false);
+        setProfileNickname(null);
+        setNicknameDraft("");
+      });
+      return;
+    }
 
-    void ensurePublicUserRow(user);
+    startTransition(() => {
+      setProfileReady(false);
+    });
+
+    void (async () => {
+      await ensurePublicUserRow(user);
+      const { data, error } = await supabase
+        .from("users")
+        .select("nickname")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (error) {
+        setErrorMessage(error.message);
+        setProfileReady(true);
+        return;
+      }
+
+      const nick = data?.nickname ?? null;
+      setProfileNickname(nick);
+      setProfileReady(true);
+    })();
+  }, [userId, user]);
+
+  /** nickname 確定後に投稿・いいね取得 */
+  useEffect(() => {
+    if (!userId || !profileReady || needsNickname) {
+      if (!userId || !profileReady) {
+        startTransition(() => {
+          setPosts([]);
+          setLikedPostIds(new Set());
+        });
+      }
+      return;
+    }
 
     const run = async () => {
       try {
@@ -119,7 +207,7 @@ export default function Home() {
     };
 
     void run();
-  }, [userId, user]);
+  }, [userId, profileReady, needsNickname]);
 
   const signInWithGoogle = async () => {
     setErrorMessage(null);
@@ -143,12 +231,44 @@ export default function Home() {
     }
     setPosts([]);
     setLikedPostIds(new Set());
+    setProfileNickname(null);
+    setProfileReady(false);
+    setNicknameDraft("");
+  };
+
+  const handleNicknameSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    const result = validateNickname(nicknameDraft);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("users")
+      .update({ nickname: result.value })
+      .eq("id", userId);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setProfileNickname(result.value);
+    setNicknameDraft("");
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) {
       setErrorMessage("ログインしてください。");
+      return;
+    }
+    if (needsNickname) {
+      setErrorMessage("先にニックネームを設定してください。");
       return;
     }
     const content = input.trim();
@@ -266,7 +386,34 @@ export default function Home() {
           </p>
         ) : null}
 
-        {userId ? (
+        {userId && profileReady && needsNickname ? (
+          <form
+            onSubmit={handleNicknameSubmit}
+            className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4"
+          >
+            <p className="text-sm text-gray-700">
+              はじめにニックネームを設定してください（1〜20文字・改行不可）。
+            </p>
+            <input
+              value={nicknameDraft}
+              onChange={(e) =>
+                setNicknameDraft(e.target.value.replace(/[\n\r]/g, ""))
+              }
+              maxLength={20}
+              placeholder="ニックネーム"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+              autoComplete="nickname"
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
+            >
+              保存してはじめる
+            </button>
+          </form>
+        ) : null}
+
+        {userId && profileReady && !needsNickname ? (
           <>
             <form
               onSubmit={handleSubmit}
@@ -292,7 +439,10 @@ export default function Home() {
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
                 >
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm font-medium text-gray-800">
+                    {post.users?.nickname ?? "（未設定）"}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500">
                     {post.created_at
                       ? new Date(post.created_at).toLocaleString()
                       : ""}
@@ -331,6 +481,10 @@ export default function Home() {
               ))}
             </ul>
           </>
+        ) : null}
+
+        {userId && !profileReady ? (
+          <p className="text-gray-600">プロフィールを読み込み中…</p>
         ) : null}
       </div>
     </main>
