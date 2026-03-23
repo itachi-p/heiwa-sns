@@ -29,6 +29,9 @@ export default function Home() {
   /** null = 未設定 → ニックネーム入力が必要 */
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
   const [nicknameDraft, setNicknameDraft] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -222,6 +225,37 @@ export default function Home() {
     }
   };
 
+  const signInWithEmail = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail || !password) {
+      setErrorMessage("メールアドレスとパスワードを入力してください。");
+      return;
+    }
+
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+      });
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+      setErrorMessage("確認メールを送信しました。メールを確認してください。");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+    if (error) {
+      setErrorMessage(error.message);
+    }
+  };
+
   const signOut = async () => {
     setErrorMessage(null);
     const { error } = await supabase.auth.signOut();
@@ -345,14 +379,17 @@ export default function Home() {
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">Simple SNS</h1>
+          <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
           <div className="flex items-center gap-2 text-sm">
             {!authReady ? (
               <span className="text-gray-500">読み込み中…</span>
             ) : userId ? (
               <>
-                <span className="max-w-[200px] truncate text-gray-600" title={user?.email ?? ""}>
-                  {user?.email ?? userId.slice(0, 8) + "…"}
+                <span
+                  className="max-w-[200px] truncate text-gray-600"
+                  title={profileNickname ?? ""}
+                >
+                  {profileNickname ?? "ニックネーム未設定"}
                 </span>
                 <button
                   type="button"
@@ -363,13 +400,15 @@ export default function Home() {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => void signInWithGoogle()}
-                className="rounded border border-gray-300 bg-white px-3 py-1 hover:bg-gray-50"
-              >
-                Googleでログイン
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void signInWithGoogle()}
+                  className="rounded border border-gray-300 bg-white px-3 py-1 hover:bg-gray-50"
+                >
+                  Googleでログイン
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -381,9 +420,46 @@ export default function Home() {
         ) : null}
 
         {!userId && authReady ? (
-          <p className="text-gray-600">
-            投稿・いいねを利用するには Google でログインしてください。
-          </p>
+          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+            <p className="mb-3 text-sm text-gray-600">
+              投稿・いいねを利用するにはログインしてください。
+            </p>
+            <form onSubmit={signInWithEmail} className="flex flex-col gap-2">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="email@example.com"
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="パスワード"
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {authMode === "login" ? "メールでログイン" : "メールで新規登録"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAuthMode((prev) => (prev === "login" ? "signup" : "login"))
+                  }
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  {authMode === "login"
+                    ? "新規登録に切替"
+                    : "ログインに切替"}
+                </button>
+              </div>
+            </form>
+          </div>
         ) : null}
 
         {userId && profileReady && needsNickname ? (
