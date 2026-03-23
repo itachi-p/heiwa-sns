@@ -6,7 +6,7 @@ import React, {
   useState,
   type FormEvent,
 } from "react";
-import type { User } from "@supabase/supabase-js";
+import type { PostgrestError, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { validateNickname } from "@/lib/nickname";
 
@@ -287,6 +287,11 @@ export default function Home() {
       .eq("id", userId);
 
     if (error) {
+      const pgErr = error as PostgrestError;
+      if (pgErr.code === "23505") {
+        setErrorMessage("そのニックネームは既に使われています。");
+        return;
+      }
       setErrorMessage(error.message);
       return;
     }
@@ -424,6 +429,45 @@ export default function Home() {
             <p className="mb-3 text-sm text-gray-600">
               投稿・いいねを利用するにはログインしてください。
             </p>
+            <div className="mb-3 flex items-center gap-2 text-xs">
+              <span className="text-gray-500">現在のモード:</span>
+              <span
+                className={[
+                  "rounded-full px-2 py-1 font-medium",
+                  authMode === "login"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-emerald-100 text-emerald-700",
+                ].join(" ")}
+              >
+                {authMode === "login" ? "ログイン" : "新規登録"}
+              </span>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAuthMode("login")}
+                className={[
+                  "rounded-md border px-3 py-2 text-sm font-medium",
+                  authMode === "login"
+                    ? "border-blue-500 bg-blue-50 text-blue-700"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                ].join(" ")}
+              >
+                ログイン
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthMode("signup")}
+                className={[
+                  "rounded-md border px-3 py-2 text-sm font-medium",
+                  authMode === "signup"
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                    : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                ].join(" ")}
+              >
+                新規登録
+              </button>
+            </div>
             <form onSubmit={signInWithEmail} className="flex flex-col gap-2">
               <input
                 type="email"
@@ -442,20 +486,14 @@ export default function Home() {
               <div className="flex gap-2">
                 <button
                   type="submit"
-                  className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  className={[
+                    "rounded-md px-3 py-2 text-sm font-medium text-white",
+                    authMode === "login"
+                      ? "bg-blue-600 hover:bg-blue-700"
+                      : "bg-emerald-600 hover:bg-emerald-700",
+                  ].join(" ")}
                 >
                   {authMode === "login" ? "メールでログイン" : "メールで新規登録"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAuthMode((prev) => (prev === "login" ? "signup" : "login"))
-                  }
-                  className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50"
-                >
-                  {authMode === "login"
-                    ? "新規登録に切替"
-                    : "ログインに切替"}
                 </button>
               </div>
             </form>
