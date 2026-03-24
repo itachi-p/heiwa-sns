@@ -1,0 +1,21 @@
+{
+  "name": "Nagi SNS",
+  "short_name": "Nagi",
+  "description": "穏やかな支流のようなSNS",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#b3e5fc",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
