@@ -384,7 +384,12 @@ export default function Home() {
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
+          <div>
+            <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              「数」に追われる荒波から、穏やかな支流へ。
+            </p>
+          </div>
           <div className="flex items-center gap-2 text-sm">
             {!authReady ? (
               <span className="text-gray-500">読み込み中…</span>
