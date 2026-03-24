@@ -92,6 +92,16 @@ Nagi SNS（仮名）は、現代のSNSにおける以下の課題に対する解
 
 ---
 
+## ■ 開発ドキュメント（内部向け）
+
+- 設計原則: `docs/PRODUCT_PRINCIPLES.md`
+- 意思決定ログ: `docs/DECISIONS.md`
+- 前提と見送り案: `docs/ASSUMPTIONS_AND_REJECTED_IDEAS.md`
+- 外部向け思想説明: `docs/RATIONALE_PUBLIC.md`
+- 公開準備チェックリスト: `docs/LAUNCH_PLAN.md`
+
+---
+
 ## ■ License
 
 TBD
