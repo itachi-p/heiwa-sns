@@ -87,7 +87,7 @@ Nagi SNS（仮名）は、現代のSNSにおける以下の課題に対する解
 
 ### SNSの構造的課題まとめ（Genspark）
 
-以下は、SNSの構造的問題を整理した外部ページです。  
+以下は、SNSの構造的問題を整理した外部ページです。
 [SNSの構造的問題についてのまとめ](https://www.genspark.ai/spark?id=bc2e6ede-9476-4bbc-8daa-396d1b6275b0)
 
 ---

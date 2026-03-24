@@ -21,6 +21,27 @@ type Post = {
   users?: { nickname: string | null } | null;
 };
 
+function renderTextWithLinks(text: string) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const isUrl = /^https?:\/\/[^\s]+$/;
+  return text.split(urlRegex).map((part, idx) => {
+    if (isUrl.test(part)) {
+      return (
+        <a
+          key={`${part}-${idx}`}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <React.Fragment key={`${part}-${idx}`}>{part}</React.Fragment>;
+  });
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -380,6 +401,32 @@ export default function Home() {
     });
   };
 
+  const handleDeletePost = async (postId: number) => {
+    if (!userId) {
+      setErrorMessage("ログインしてください。");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("posts")
+      .delete()
+      .eq("id", postId)
+      .eq("user_id", userId);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    setErrorMessage(null);
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    setLikedPostIds((prev) => {
+      const next = new Set(prev);
+      next.delete(postId);
+      return next;
+    });
+  };
+
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
@@ -538,10 +585,11 @@ export default function Home() {
               onSubmit={handleSubmit}
               className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4"
             >
-              <input
+              <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="いまどうしてる？"
+                rows={4}
                 className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
               />
               <button
@@ -558,15 +606,28 @@ export default function Home() {
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
                 >
-                  <div className="text-sm font-medium text-gray-800">
-                    {post.users?.nickname ?? "（未設定）"}
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium text-gray-800">
+                      {post.users?.nickname ?? "（未設定）"}
+                    </div>
+                    {post.user_id === userId ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeletePost(post.id)}
+                        className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                      >
+                        削除
+                      </button>
+                    ) : null}
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {post.created_at
                       ? new Date(post.created_at).toLocaleString()
                       : ""}
                   </div>
-                  <div className="mt-1 whitespace-pre-wrap">{post.content}</div>
+                  <div className="mt-1 whitespace-pre-wrap break-words">
+                    {renderTextWithLinks(post.content)}
+                  </div>
                   <div className="mt-3">
                     {(() => {
                       const liked = likedPostIds.has(post.id);
