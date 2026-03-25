@@ -59,6 +59,23 @@ export default function Home() {
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
   );
+  const [moderation, setModeration] = useState<{
+    mode: "auto" | "mock" | "perspective";
+    overallMax: number;
+    truncated: boolean;
+    paragraphs: Array<{
+      index: number;
+      text: string;
+      maxScore: number;
+      scores: Record<string, number>;
+    }>;
+  } | null>(null);
+  const [moderationMode, setModerationMode] = useState<
+    "auto" | "mock" | "perspective"
+  >("auto");
+  const [blockOnSubmit, setBlockOnSubmit] = useState(false);
+  const [blockThreshold, setBlockThreshold] = useState(0.7);
+  const [maxParagraphsToAnalyze, setMaxParagraphsToAnalyze] = useState(5);
 
   const userId = user?.id ?? null;
 
@@ -334,6 +351,39 @@ export default function Home() {
     const content = input.trim();
     if (!content) return;
 
+    // Test-first: analyze on submit so you can observe score changes quickly.
+    try {
+      const res = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: content,
+          maxParagraphs: maxParagraphsToAnalyze,
+          mode: moderationMode,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setErrorMessage(json?.error ?? "AI判定に失敗しました。");
+        return;
+      }
+      setModeration(json);
+      if (blockOnSubmit && typeof json?.overallMax === "number") {
+        if (json.overallMax >= blockThreshold) {
+          setErrorMessage(
+            `AI判定スコアが高いため投稿を保留しました（max=${json.overallMax.toFixed(
+              3
+            )}）。`
+          );
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("moderation error:", err);
+      setErrorMessage("AI判定に失敗しました。");
+      return;
+    }
+
     const { data, error } = await supabase
       .from("posts")
       .insert({ content, user_id: userId })
@@ -585,6 +635,119 @@ export default function Home() {
               onSubmit={handleSubmit}
               className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4"
             >
+              <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                  AI判定（テスト用）
+                </summary>
+                <div className="mt-3 grid gap-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <span className="text-gray-600">モード</span>
+                      <select
+                        className="rounded border border-gray-300 bg-white px-2 py-1"
+                        value={moderationMode}
+                        onChange={(e) =>
+                          setModerationMode(
+                            e.target.value as "auto" | "mock" | "perspective"
+                          )
+                        }
+                      >
+                        <option value="auto">auto</option>
+                        <option value="mock">mock（無料）</option>
+                        <option value="perspective">perspective</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <span className="text-gray-600">段落上限</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={maxParagraphsToAnalyze}
+                        onChange={(e) =>
+                          setMaxParagraphsToAnalyze(
+                            Math.max(1, Math.min(20, Number(e.target.value)))
+                          )
+                        }
+                        className="w-20 rounded border border-gray-300 bg-white px-2 py-1"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={blockOnSubmit}
+                        onChange={(e) => setBlockOnSubmit(e.target.checked)}
+                      />
+                      <span className="text-gray-700">
+                        スコアが高い場合は投稿を保留（テスト用）
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <span className="text-gray-600">閾値</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={blockThreshold}
+                        onChange={(e) =>
+                          setBlockThreshold(
+                            Math.max(0, Math.min(1, Number(e.target.value)))
+                          )
+                        }
+                        className="w-24 rounded border border-gray-300 bg-white px-2 py-1"
+                      />
+                    </label>
+                  </div>
+                  {moderation ? (
+                    <div className="rounded-md border border-gray-200 bg-white p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-medium text-gray-800">
+                          判定結果（mode: {moderation.mode} / max:{" "}
+                          {moderation.overallMax.toFixed(3)}）
+                        </div>
+                        {moderation.truncated ? (
+                          <div className="text-xs text-gray-600">
+                            解析対象を段落上限で切り詰めています
+                          </div>
+                        ) : null}
+                      </div>
+                      <ol className="mt-2 space-y-2 text-sm">
+                        {moderation.paragraphs.map((p) => (
+                          <li
+                            key={p.index}
+                            className="rounded border border-gray-200 p-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs text-gray-600">
+                                段落 {p.index + 1}
+                              </div>
+                              <div className="text-xs font-medium text-gray-800">
+                                max {p.maxScore.toFixed(3)}
+                              </div>
+                            </div>
+                            <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-gray-800">
+                              {p.text}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
+                              {Object.entries(p.scores).map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="rounded bg-gray-100 px-2 py-1"
+                                >
+                                  {k}: {Number(v).toFixed(3)}
+                                </span>
+                              ))}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
+                </div>
+              </details>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
