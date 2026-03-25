@@ -71,8 +71,8 @@ export default function Home() {
     }>;
   } | null>(null);
   const [moderationMode, setModerationMode] = useState<
-    "auto" | "mock" | "perspective"
-  >("auto");
+    "mock" | "perspective"
+  >("perspective");
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
 
@@ -476,7 +476,12 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50 text-gray-900">
+    <main
+      className={[
+        "min-h-screen text-gray-900",
+        moderationMode === "mock" ? "bg-rose-50" : "bg-gray-50",
+      ].join(" ")}
+    >
       <div className="mx-auto max-w-xl p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -646,15 +651,17 @@ export default function Home() {
                         value={moderationMode}
                         onChange={(e) =>
                           setModerationMode(
-                            e.target.value as "auto" | "mock" | "perspective"
+                            e.target.value as "mock" | "perspective"
                           )
                         }
                       >
-                        <option value="auto">auto</option>
-                        <option value="mock">mock（無料）</option>
+                        <option value="mock">mock（簡易）</option>
                         <option value="perspective">perspective</option>
                       </select>
                     </label>
+                    <span className="text-xs font-medium text-red-700">
+                      ※mockモードは特定のNGワード検出のみの簡易判定
+                    </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2">
