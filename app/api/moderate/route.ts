@@ -20,11 +20,8 @@ function clamp01(n: unknown) {
   return Math.max(0, Math.min(1, x));
 }
 
-function splitParagraphs(text: string) {
-  return text
-    .split(/\n{2,}/g)
-    .map((t) => t.trim())
-    .filter(Boolean);
+function normalizeText(text: string) {
+  return text.trim();
 }
 
 async function analyzeWithPerspective(text: string) {
@@ -48,7 +45,7 @@ async function analyzeWithPerspective(text: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       comment: { text },
-      languages: ["ja", "en"],
+      languages: ["ja"],
       requestedAttributes,
       doNotStore: true,
     }),
@@ -63,7 +60,19 @@ async function analyzeWithPerspective(text: string) {
     );
   }
 
-  const json = (await res.json()) as any;
+  const json = (await res.json()) as {
+    attributeScores?: Partial<
+      Record<
+        AttributeName,
+        {
+          summaryScore?: {
+            value?: number;
+            score?: number;
+          };
+        }
+      >
+    >;
+  };
   const scores: Partial<Record<AttributeName, number>> = {};
   for (const name of Object.keys(requestedAttributes) as AttributeName[]) {
     const v =
@@ -79,7 +88,7 @@ function mockScores(text: string) {
   // cheap, deterministic-ish heuristic for UI testing without API calls
   const t = text.toLowerCase();
   const hits =
-    (t.match(/死ね|殺|きも|バカ|ばか|クソ|くそ|fuck|shit|kill|die/g) ?? []).length;
+    (t.match(/死ね|殺|きも|バカ|ばか|クソ|くそ|カス|ボケ|アホ|fuck|shit|kill/g) ?? []).length;
   const base = Math.min(1, hits / 3);
   return {
     TOXICITY: clamp01(base),
@@ -95,26 +104,21 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => null)) as
       | {
           text?: string;
-          maxParagraphs?: number;
           mode?: "auto" | "mock" | "perspective";
         }
       | null;
 
     const text = body?.text ?? "";
-    const maxParagraphs = Math.max(
-      1,
-      Math.min(20, Number(body?.maxParagraphs ?? 5))
-    );
     const mode = body?.mode ?? "auto";
 
-    if (typeof text !== "string" || !text.trim()) {
+    if (typeof text !== "string" || !normalizeText(text)) {
       return NextResponse.json(
         { error: "text is required" },
         { status: 400 }
       );
     }
 
-    const paragraphs = splitParagraphs(text).slice(0, maxParagraphs);
+    const paragraphs = [normalizeText(text)];
     const results: ParagraphResult[] = [];
 
     for (let i = 0; i < paragraphs.length; i++) {
@@ -147,7 +151,7 @@ export async function POST(req: Request) {
           : mode,
       paragraphs: results,
       overallMax,
-      truncated: splitParagraphs(text).length > paragraphs.length,
+      truncated: false,
       attributes: [
         "TOXICITY",
         "SEVERE_TOXICITY",

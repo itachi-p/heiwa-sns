@@ -75,7 +75,6 @@ export default function Home() {
   >("auto");
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
-  const [maxParagraphsToAnalyze, setMaxParagraphsToAnalyze] = useState(5);
 
   const userId = user?.id ?? null;
 
@@ -358,7 +357,6 @@ export default function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           text: content,
-          maxParagraphs: maxParagraphsToAnalyze,
           mode: moderationMode,
         }),
       });
@@ -657,21 +655,6 @@ export default function Home() {
                         <option value="perspective">perspective</option>
                       </select>
                     </label>
-                    <label className="flex items-center gap-2">
-                      <span className="text-gray-600">段落上限</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={maxParagraphsToAnalyze}
-                        onChange={(e) =>
-                          setMaxParagraphsToAnalyze(
-                            Math.max(1, Math.min(20, Number(e.target.value)))
-                          )
-                        }
-                        className="w-20 rounded border border-gray-300 bg-white px-2 py-1"
-                      />
-                    </label>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2">
@@ -708,42 +691,19 @@ export default function Home() {
                           判定結果（mode: {moderation.mode} / max:{" "}
                           {moderation.overallMax.toFixed(3)}）
                         </div>
-                        {moderation.truncated ? (
-                          <div className="text-xs text-gray-600">
-                            解析対象を段落上限で切り詰めています
-                          </div>
-                        ) : null}
                       </div>
-                      <ol className="mt-2 space-y-2 text-sm">
-                        {moderation.paragraphs.map((p) => (
-                          <li
-                            key={p.index}
-                            className="rounded border border-gray-200 p-2"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-xs text-gray-600">
-                                段落 {p.index + 1}
-                              </div>
-                              <div className="text-xs font-medium text-gray-800">
-                                max {p.maxScore.toFixed(3)}
-                              </div>
-                            </div>
-                            <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-gray-800">
-                              {p.text}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
-                              {Object.entries(p.scores).map(([k, v]) => (
-                                <span
-                                  key={k}
-                                  className="rounded bg-gray-100 px-2 py-1"
-                                >
-                                  {k}: {Number(v).toFixed(3)}
-                                </span>
-                              ))}
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
+                        {Object.entries(moderation.paragraphs?.[0]?.scores ?? {})
+                          .sort(([a], [b]) => a.localeCompare(b))
+                          .map(([k, v]) => (
+                            <span
+                              key={k}
+                              className="rounded bg-gray-100 px-2 py-1"
+                            >
+                              {k}: {Number(v).toFixed(3)}
+                            </span>
+                          ))}
+                      </div>
                     </div>
                   ) : null}
                 </div>
