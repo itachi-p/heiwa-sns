@@ -72,7 +72,7 @@ export default function Home() {
   } | null>(null);
   const [moderationMode, setModerationMode] = useState<
     "mock" | "perspective"
-  >("perspective");
+  >("mock");
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
 
@@ -479,7 +479,7 @@ export default function Home() {
     <main
       className={[
         "min-h-screen text-gray-900",
-        moderationMode === "mock" ? "bg-rose-50" : "bg-gray-50",
+        moderationMode === "mock" ? "bg-rose-50" : "bg-sky-50",
       ].join(" ")}
     >
       <div className="mx-auto max-w-xl p-6">
@@ -643,11 +643,11 @@ export default function Home() {
                   AI判定（テスト用）
                 </summary>
                 <div className="mt-3 grid gap-3 text-sm">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2">
-                      <span className="text-gray-600">モード</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                    <label className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
+                      <span className="shrink-0 text-gray-600">モード</span>
                       <select
-                        className="rounded border border-gray-300 bg-white px-2 py-1"
+                        className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1"
                         value={moderationMode}
                         onChange={(e) =>
                           setModerationMode(
@@ -656,12 +656,18 @@ export default function Home() {
                         }
                       >
                         <option value="mock">mock（簡易）</option>
-                        <option value="perspective">perspective</option>
+                        <option value="perspective">AI判定</option>
                       </select>
+                      {moderationMode === "mock" ? (
+                        <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
+                          ※mockモードは特定NGワードのみ検出
+                        </span>
+                      ) : (
+                        <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
+                          ※AI判定は現状1日の使用量上限あり
+                        </span>
+                      )}
                     </label>
-                    <span className="text-xs font-medium text-red-700">
-                      ※mockモードは特定のNGワード検出のみの簡易判定
-                    </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <label className="flex items-center gap-2">
