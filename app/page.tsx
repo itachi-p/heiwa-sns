@@ -126,6 +126,7 @@ export default function Home() {
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const userId = user?.id ?? null;
 
@@ -539,47 +540,47 @@ export default function Home() {
       ].join(" ")}
     >
       <div className="mx-auto max-w-xl p-6">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="mb-4">
+          <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
-            <p className="mt-1 text-sm text-gray-600">
-              「数」に追われる荒波から、穏やかな支流へ。
-            </p>
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
-            {!authReady ? (
-              <span className="text-gray-500">読み込み中…</span>
-            ) : userId ? (
-              <>
-                <span className="flex items-center gap-2">
-                  <Avatar name={profileNickname} />
-                  <span
-                    className="max-w-[200px] truncate text-gray-600"
-                    title={profileNickname ?? ""}
-                  >
-                    {profileNickname ?? "ニックネーム未設定"}
+            <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
+              {!authReady ? (
+                <span className="text-gray-500">読み込み中…</span>
+              ) : userId ? (
+                <>
+                  <span className="flex items-center gap-2">
+                    <Avatar name={profileNickname} />
+                    <span
+                      className="max-w-[200px] truncate text-gray-600"
+                      title={profileNickname ?? ""}
+                    >
+                      {profileNickname ?? "ニックネーム未設定"}
+                    </span>
                   </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void signOut()}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
-                >
-                  ログアウト
-                </button>
-              </>
-            ) : (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void signInWithGoogle()}
-                  className="rounded border border-gray-300 bg-white px-3 py-1 hover:bg-gray-50"
-                >
-                  Googleでログイン
-                </button>
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={() => void signOut()}
+                    className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
+                  >
+                    ログアウト
+                  </button>
+                </>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void signInWithGoogle()}
+                    className="rounded border border-gray-300 bg-white px-3 py-1 hover:bg-gray-50"
+                  >
+                    Googleでログイン
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
+          <p className="mt-1 text-sm text-gray-600">
+            「数」に追われる荒波から、穏やかな支流へ。
+          </p>
         </div>
 
         {errorMessage ? (
@@ -709,107 +710,132 @@ export default function Home() {
                 ホーム
               </Link>
             </div>
-            <form
-              onSubmit={handleSubmit}
-              className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4"
-            >
-              <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-gray-800">
-                  AI判定（テスト用）
-                </summary>
-                <div className="mt-3 grid gap-3 text-sm">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-                    <label className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
-                      <span className="shrink-0 text-gray-600">モード</span>
-                      <select
-                        className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1"
-                        value={moderationMode}
-                        onChange={(e) =>
-                          setModerationMode(
-                            e.target.value as "mock" | "perspective"
-                          )
-                        }
-                      >
-                        <option value="mock">mock（簡易）</option>
-                        <option value="perspective">AI判定</option>
-                      </select>
-                      {moderationMode === "mock" ? (
-                        <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
-                          ※mockモードは特定NGワードのみ検出
-                        </span>
-                      ) : (
-                        <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
-                          ※AI判定は現状1日の使用量上限あり
-                        </span>
-                      )}
-                    </label>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={blockOnSubmit}
-                        onChange={(e) => setBlockOnSubmit(e.target.checked)}
-                      />
-                      <span className="text-gray-700">
-                        スコアが高い場合は投稿を保留（テスト用）
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <span className="text-gray-600">閾値</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={blockThreshold}
-                        onChange={(e) =>
-                          setBlockThreshold(
-                            Math.max(0, Math.min(1, Number(e.target.value)))
-                          )
-                        }
-                        className="w-24 rounded border border-gray-300 bg-white px-2 py-1"
-                      />
-                    </label>
-                  </div>
-                  {moderation ? (
-                    <div className="rounded-md border border-gray-200 bg-white p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-gray-800">
-                          判定結果（mode: {moderation.mode} / max:{" "}
-                          {moderation.overallMax.toFixed(3)}）
-                        </div>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
-                        {Object.entries(moderation.paragraphs?.[0]?.scores ?? {})
-                          .sort(([a], [b]) => a.localeCompare(b))
-                          .map(([k, v]) => (
-                            <span
-                              key={k}
-                              className="rounded bg-gray-100 px-2 py-1"
-                            >
-                              {k}: {Number(v).toFixed(3)}
+            <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-gray-700">新規投稿</h2>
+                <button
+                  type="button"
+                  onClick={() => setComposeOpen((prev) => !prev)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-lg font-semibold text-blue-700 hover:bg-blue-100"
+                  aria-label="投稿フォームを開く"
+                  title="投稿"
+                >
+                  +
+                </button>
+              </div>
+              {composeOpen ? (
+                <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+                  <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-gray-800">
+                      AI判定（テスト用）
+                    </summary>
+                    <div className="mt-3 grid gap-3 text-sm">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                        <label className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
+                          <span className="shrink-0 text-gray-600">モード</span>
+                          <select
+                            className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1"
+                            value={moderationMode}
+                            onChange={(e) =>
+                              setModerationMode(
+                                e.target.value as "mock" | "perspective"
+                              )
+                            }
+                          >
+                            <option value="mock">mock（簡易）</option>
+                            <option value="perspective">AI判定</option>
+                          </select>
+                          {moderationMode === "mock" ? (
+                            <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
+                              ※mockモードは特定NGワードのみ検出
                             </span>
-                          ))}
+                          ) : (
+                            <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
+                              ※AI判定は現状1日の使用量上限あり
+                            </span>
+                          )}
+                        </label>
                       </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={blockOnSubmit}
+                            onChange={(e) => setBlockOnSubmit(e.target.checked)}
+                          />
+                          <span className="text-gray-700">
+                            スコアが高い場合は投稿を保留（テスト用）
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <span className="text-gray-600">閾値</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={blockThreshold}
+                            onChange={(e) =>
+                              setBlockThreshold(
+                                Math.max(0, Math.min(1, Number(e.target.value)))
+                              )
+                            }
+                            className="w-24 rounded border border-gray-300 bg-white px-2 py-1"
+                          />
+                        </label>
+                      </div>
+                      {moderation ? (
+                        <div className="rounded-md border border-gray-200 bg-white p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-sm font-medium text-gray-800">
+                              判定結果（mode: {moderation.mode} / max:{" "}
+                              {moderation.overallMax.toFixed(3)}）
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
+                            {Object.entries(moderation.paragraphs?.[0]?.scores ?? {})
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="rounded bg-gray-100 px-2 py-1"
+                                >
+                                  {k}: {Number(v).toFixed(3)}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </details>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="いまどうしてる？"
-                rows={4}
-                className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-              />
-              <button
-                type="submit"
-                className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
-              >
-                投稿
-              </button>
-            </form>
+                  </details>
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="いまどうしてる？"
+                    rows={4}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700"
+                    >
+                      投稿
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setComposeOpen(false);
+                        setInput("");
+                      }}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+            </section>
 
             <section>
               <h2 className="mb-2 text-sm font-semibold text-gray-700">
