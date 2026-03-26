@@ -6,6 +6,7 @@ import React, {
   useState,
   type FormEvent,
 } from "react";
+import Link from "next/link";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { validateNickname } from "@/lib/nickname";
@@ -116,7 +117,6 @@ export default function Home() {
 
   const needsNickname =
     Boolean(userId) && profileReady && profileNickname === null;
-  const ownPosts = posts.filter((post) => post.user_id === userId);
   const timelinePosts = posts.filter((post) => post.user_id !== userId);
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
@@ -517,32 +517,6 @@ export default function Home() {
     });
   };
 
-  const handleDeletePost = async (postId: number) => {
-    if (!userId) {
-      setErrorMessage("ログインしてください。");
-      return;
-    }
-
-    const { error } = await supabase
-      .from("posts")
-      .delete()
-      .eq("id", postId)
-      .eq("user_id", userId);
-
-    if (error) {
-      setErrorMessage(error.message);
-      return;
-    }
-
-    setErrorMessage(null);
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
-    setLikedPostIds((prev) => {
-      const next = new Set(prev);
-      next.delete(postId);
-      return next;
-    });
-  };
-
   return (
     <main
       className={[
@@ -707,6 +681,17 @@ export default function Home() {
 
         {userId && profileReady && !needsNickname ? (
           <>
+            <div className="mb-4 flex items-center gap-2 text-sm">
+              <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
+                タイムライン
+              </span>
+              <Link
+                href="/home"
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
+              >
+                ホーム
+              </Link>
+            </div>
             <form
               onSubmit={handleSubmit}
               className="mb-6 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4"
@@ -808,47 +793,6 @@ export default function Home() {
                 投稿
               </button>
             </form>
-
-            <section className="mb-6">
-              <h2 className="mb-2 text-sm font-semibold text-gray-700">
-                あなたの投稿（新しい順）
-              </h2>
-              {ownPosts.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  まだあなたの投稿はありません。
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {ownPosts.map((post) => (
-                    <li
-                      key={post.id}
-                      className="break-words rounded-lg border border-gray-200 bg-white p-4"
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-gray-800">
-                          {post.users?.nickname ?? "（未設定）"}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeletePost(post.id)}
-                          className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
-                        >
-                          削除
-                        </button>
-                      </div>
-                      <div className="mt-1 text-sm text-gray-500">
-                        {post.created_at
-                          ? new Date(post.created_at).toLocaleString()
-                          : ""}
-                      </div>
-                      <div className="mt-1 whitespace-pre-wrap break-words">
-                        {renderTextWithLinks(post.content)}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
 
             <section>
               <h2 className="mb-2 text-sm font-semibold text-gray-700">
