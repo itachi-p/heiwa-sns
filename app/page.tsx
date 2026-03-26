@@ -21,6 +21,41 @@ type Post = {
   users?: { nickname: string | null } | null;
 };
 
+const AUTH_TIMEOUT_MS = 15000;
+
+function formatAuthError(error: unknown, fallback: string) {
+  if (!error) return fallback;
+  if (typeof error === "string") {
+    const msg = error.trim();
+    return msg && msg !== "{}" ? msg : fallback;
+  }
+  if (error instanceof Error) {
+    const msg = error.message?.trim();
+    return msg && msg !== "{}" ? msg : fallback;
+  }
+  if (typeof error === "object") {
+    const rec = error as Record<string, unknown>;
+    const message = typeof rec.message === "string" ? rec.message.trim() : "";
+    const code = typeof rec.code === "string" ? rec.code.trim() : "";
+    const status =
+      typeof rec.status === "number" ? ` (status: ${rec.status})` : "";
+    if (message && message !== "{}") {
+      return `${message}${code ? ` [${code}]` : ""}${status}`;
+    }
+  }
+  return fallback;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function renderTextWithLinks(text: string) {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const isUrl = /^https?:\/\/[^\s]+$/;
@@ -75,11 +110,14 @@ export default function Home() {
   >("mock");
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   const userId = user?.id ?? null;
 
   const needsNickname =
     Boolean(userId) && profileReady && profileNickname === null;
+  const ownPosts = posts.filter((post) => post.user_id === userId);
+  const timelinePosts = posts.filter((post) => post.user_id !== userId);
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
@@ -271,25 +309,55 @@ export default function Home() {
       return;
     }
 
-    if (authMode === "signup") {
-      const { error } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-      });
-      if (error) {
-        setErrorMessage(error.message);
+    setAuthSubmitting(true);
+    try {
+      if (authMode === "signup") {
+        const { error } = await withTimeout(
+          supabase.auth.signUp({
+            email: normalizedEmail,
+            password,
+          }),
+          AUTH_TIMEOUT_MS,
+          "認証リクエストがタイムアウトしました。時間をおいて再試行してください。"
+        );
+        if (error) {
+          setErrorMessage(
+            formatAuthError(
+              error,
+              "新規登録に失敗しました。時間をおいて再試行してください。"
+            )
+          );
+          return;
+        }
+        setErrorMessage("確認メールを送信しました。メールを確認してください。");
         return;
       }
-      setErrorMessage("確認メールを送信しました。メールを確認してください。");
-      return;
-    }
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
-    if (error) {
-      setErrorMessage(error.message);
+      const { error } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        }),
+        AUTH_TIMEOUT_MS,
+        "認証リクエストがタイムアウトしました。時間をおいて再試行してください。"
+      );
+      if (error) {
+        setErrorMessage(
+          formatAuthError(
+            error,
+            "ログインに失敗しました。時間をおいて再試行してください。"
+          )
+        );
+      }
+    } catch (err) {
+      setErrorMessage(
+        formatAuthError(
+          err,
+          "認証処理中にエラーが発生しました。時間をおいて再試行してください。"
+        )
+      );
+    } finally {
+      setAuthSubmitting(false);
     }
   };
 
@@ -591,14 +659,19 @@ export default function Home() {
               <div className="flex gap-2">
                 <button
                   type="submit"
+                  disabled={authSubmitting}
                   className={[
-                    "rounded-md px-3 py-2 text-sm font-medium text-white",
+                    "rounded-md px-3 py-2 text-sm font-medium text-white disabled:opacity-60",
                     authMode === "login"
                       ? "bg-blue-600 hover:bg-blue-700"
                       : "bg-emerald-600 hover:bg-emerald-700",
                   ].join(" ")}
                 >
-                  {authMode === "login" ? "メールでログイン" : "メールで新規登録"}
+                  {authSubmitting
+                    ? "処理中..."
+                    : authMode === "login"
+                      ? "メールでログイン"
+                      : "メールで新規登録"}
                 </button>
               </div>
             </form>
@@ -736,8 +809,58 @@ export default function Home() {
               </button>
             </form>
 
-            <ul className="space-y-3">
-              {posts.map((post) => (
+            <section className="mb-6">
+              <h2 className="mb-2 text-sm font-semibold text-gray-700">
+                あなたの投稿（新しい順）
+              </h2>
+              {ownPosts.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  まだあなたの投稿はありません。
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {ownPosts.map((post) => (
+                    <li
+                      key={post.id}
+                      className="break-words rounded-lg border border-gray-200 bg-white p-4"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div className="text-sm font-medium text-gray-800">
+                          {post.users?.nickname ?? "（未設定）"}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeletePost(post.id)}
+                          className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                        >
+                          削除
+                        </button>
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        {post.created_at
+                          ? new Date(post.created_at).toLocaleString()
+                          : ""}
+                      </div>
+                      <div className="mt-1 whitespace-pre-wrap break-words">
+                        {renderTextWithLinks(post.content)}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section>
+              <h2 className="mb-2 text-sm font-semibold text-gray-700">
+                タイムライン（他ユーザー）
+              </h2>
+              {timelinePosts.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  他ユーザーの投稿はまだありません。
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {timelinePosts.map((post) => (
                 <li
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
@@ -746,15 +869,6 @@ export default function Home() {
                     <div className="text-sm font-medium text-gray-800">
                       {post.users?.nickname ?? "（未設定）"}
                     </div>
-                    {post.user_id === userId ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleDeletePost(post.id)}
-                        className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
-                      >
-                        削除
-                      </button>
-                    ) : null}
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {post.created_at
@@ -794,8 +908,10 @@ export default function Home() {
                     })()}
                   </div>
                 </li>
-              ))}
-            </ul>
+                  ))}
+                </ul>
+              )}
+            </section>
           </>
         ) : null}
 
