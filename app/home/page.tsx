@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
 const supabase = createClient();
+const HOME_MODERATION_THRESHOLD = 0.7;
 
 type Post = {
   id: number;
@@ -183,6 +184,37 @@ export default function HomePage() {
 
     setSubmitting(true);
     setErrorMessage(null);
+
+    const moderationRes = await fetch("/api/moderate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: content,
+        mode: "perspective",
+      }),
+    });
+    const moderationJson = (await moderationRes.json().catch(() => null)) as
+      | { overallMax?: number; error?: string }
+      | null;
+    if (!moderationRes.ok) {
+      setErrorMessage(moderationJson?.error ?? "AI判定に失敗しました。");
+      setSubmitting(false);
+      return;
+    }
+
+    if (
+      typeof moderationJson?.overallMax === "number" &&
+      moderationJson.overallMax >= HOME_MODERATION_THRESHOLD
+    ) {
+      setErrorMessage(
+        `AI判定スコアが高いため投稿を保留しました（max=${moderationJson.overallMax.toFixed(
+          3
+        )}）。`
+      );
+      setSubmitting(false);
+      return;
+    }
+
     const { error } = await supabase
       .from("posts")
       .insert({ content, user_id: userId });
@@ -202,12 +234,12 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
             <p className="mt-1 text-sm text-gray-600">ホーム</p>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
             {!authReady ? (
               <span className="text-gray-500">読み込み中…</span>
             ) : userId ? (

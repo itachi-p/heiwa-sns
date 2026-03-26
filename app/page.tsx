@@ -539,14 +539,14 @@ export default function Home() {
       ].join(" ")}
     >
       <div className="mx-auto max-w-xl p-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
             <p className="mt-1 text-sm text-gray-600">
               「数」に追われる荒波から、穏やかな支流へ。
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
             {!authReady ? (
               <span className="text-gray-500">読み込み中…</span>
             ) : userId ? (
