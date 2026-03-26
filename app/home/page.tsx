@@ -57,6 +57,9 @@ export default function HomePage() {
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const userId = user?.id ?? null;
   const joinedAtLabel =
@@ -172,6 +175,30 @@ export default function HomePage() {
     setErrorMessage(null);
   };
 
+  const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!userId) return;
+    const content = draft.trim();
+    if (!content) return;
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("posts")
+      .insert({ content, user_id: userId });
+
+    if (error) {
+      setErrorMessage(error.message);
+      setSubmitting(false);
+      return;
+    }
+
+    setDraft("");
+    setComposeOpen(false);
+    await fetchOwnPosts(userId);
+    setSubmitting(false);
+  };
+
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
@@ -246,9 +273,55 @@ export default function HomePage() {
 
         {userId && profileReady ? (
           <section>
-            <h2 className="mb-2 text-sm font-semibold text-gray-700">
-              あなたの投稿（新しい順）
-            </h2>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-gray-700">
+                あなたの投稿（新しい順）
+              </h2>
+              <button
+                type="button"
+                onClick={() => setComposeOpen((prev) => !prev)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-lg font-semibold text-blue-700 hover:bg-blue-100"
+                aria-label="投稿フォームを開く"
+                title="投稿"
+              >
+                +
+              </button>
+            </div>
+
+            {composeOpen ? (
+              <form
+                onSubmit={handleSubmitPost}
+                className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3"
+              >
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="いまどうしてる？"
+                  rows={3}
+                  className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {submitting ? "投稿中..." : "投稿"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComposeOpen(false);
+                      setDraft("");
+                    }}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </form>
+            ) : null}
+
             {posts.length === 0 ? (
               <p className="text-sm text-gray-500">まだあなたの投稿はありません。</p>
             ) : (
