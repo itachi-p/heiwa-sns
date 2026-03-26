@@ -45,6 +45,10 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const userId = user?.id ?? null;
+  const joinedAtLabel =
+    user?.created_at != null
+      ? new Date(user.created_at).toLocaleDateString("ja-JP")
+      : null;
 
   async function ensurePublicUserRow(u: User) {
     const { error } = await supabase.from("users").upsert(
@@ -196,6 +200,13 @@ export default function HomePage() {
             ホーム
           </span>
         </div>
+
+        {userId && profileReady ? (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+            <span className="font-medium">登録日:</span>{" "}
+            {joinedAtLabel ?? "不明"}
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
