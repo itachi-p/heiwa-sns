@@ -78,6 +78,20 @@ function renderTextWithLinks(text: string) {
   });
 }
 
+function getAvatarLabel(name: string | null | undefined) {
+  const value = (name ?? "").trim();
+  if (!value) return "?";
+  return value[0]!.toUpperCase();
+}
+
+function Avatar({ name }: { name: string | null | undefined }) {
+  return (
+    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
+      {getAvatarLabel(name)}
+    </span>
+  );
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -537,11 +551,14 @@ export default function Home() {
               <span className="text-gray-500">読み込み中…</span>
             ) : userId ? (
               <>
-                <span
-                  className="max-w-[200px] truncate text-gray-600"
-                  title={profileNickname ?? ""}
-                >
-                  {profileNickname ?? "ニックネーム未設定"}
+                <span className="flex items-center gap-2">
+                  <Avatar name={profileNickname} />
+                  <span
+                    className="max-w-[200px] truncate text-gray-600"
+                    title={profileNickname ?? ""}
+                  >
+                    {profileNickname ?? "ニックネーム未設定"}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -810,8 +827,9 @@ export default function Home() {
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium text-gray-800">
-                      {post.users?.nickname ?? "（未設定）"}
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                      <Avatar name={post.users?.nickname ?? null} />
+                      <span>{post.users?.nickname ?? "（未設定）"}</span>
                     </div>
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
