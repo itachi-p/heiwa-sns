@@ -311,26 +311,15 @@ export default function HomePage() {
 
         {userId && profileReady ? (
           <section>
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-gray-700">
-                あなたの投稿（新しい順）
-              </h2>
-              <button
-                type="button"
-                onClick={() => setComposeOpen((prev) => !prev)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-lg font-semibold text-blue-700 hover:bg-blue-100"
-                aria-label="投稿フォームを開く"
-                title="投稿"
-              >
-                +
-              </button>
-            </div>
-
+            <h2 className="mb-3 text-sm font-semibold text-gray-700">
+              あなたの投稿（新しい順）
+            </h2>
             {composeOpen ? (
-              <form
-                onSubmit={handleSubmitPost}
-                className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3"
-              >
+              <div className="fixed inset-x-4 bottom-20 z-50 md:inset-x-auto md:right-6 md:w-[34rem]">
+                <form
+                  onSubmit={handleSubmitPost}
+                  className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+                >
                 <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
                   <summary className="cursor-pointer text-sm font-medium text-gray-800">
                     AI判定（テスト用）
@@ -418,7 +407,8 @@ export default function HomePage() {
                     キャンセル
                   </button>
                 </div>
-              </form>
+                </form>
+              </div>
             ) : null}
 
             {posts.length === 0 ? (
@@ -453,6 +443,15 @@ export default function HomePage() {
                 ))}
               </ul>
             )}
+            <button
+              type="button"
+              onClick={() => setComposeOpen((prev) => !prev)}
+              className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700"
+              aria-label="投稿フォームを開く"
+              title="投稿"
+            >
+              {composeOpen ? "×" : "+"}
+            </button>
           </section>
         ) : null}
       </div>
