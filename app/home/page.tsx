@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import React, { useEffect, useState } from "react";
-import type { User } from "@supabase/supabase-js";
+import type { PostgrestError, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { validateNickname } from "@/lib/nickname";
 
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
@@ -72,6 +73,13 @@ export default function HomePage() {
   const [profileReady, setProfileReady] = useState(false);
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
+  const [profileBio, setProfileBio] = useState("");
+  const [profileInterests, setProfileInterests] = useState("");
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [bioDraft, setBioDraft] = useState("");
+  const [interestsDraft, setInterestsDraft] = useState("");
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -115,7 +123,7 @@ export default function HomePage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("users")
-      .select("nickname, avatar_url")
+      .select("nickname, avatar_url, bio, interests")
       .eq("id", uid)
       .maybeSingle();
 
@@ -126,6 +134,8 @@ export default function HomePage() {
 
     const nickname = profile?.nickname ?? null;
     const avatarUrl = profile?.avatar_url ?? null;
+    const bio = profile?.bio ?? "";
+    const interests = profile?.interests ?? "";
     const merged = ((rows ?? []) as Post[]).map((p) => ({
       ...p,
       users: { nickname, avatar_url: avatarUrl },
@@ -134,6 +144,11 @@ export default function HomePage() {
     setPosts(merged);
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
+    setProfileBio(bio);
+    setProfileInterests(interests);
+    setNicknameDraft(nickname ?? "");
+    setBioDraft(bio);
+    setInterestsDraft(interests);
     setErrorMessage(null);
   };
 
@@ -178,6 +193,12 @@ export default function HomePage() {
     setPosts([]);
     setProfileNickname(null);
     setProfileAvatarUrl(null);
+    setProfileBio("");
+    setProfileInterests("");
+    setNicknameDraft("");
+    setBioDraft("");
+    setInterestsDraft("");
+    setProfileEditOpen(false);
     setProfileReady(false);
   };
 
@@ -305,6 +326,46 @@ export default function HomePage() {
     e.target.value = "";
   };
 
+  const handleProfileSave = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    const result = validateNickname(nicknameDraft);
+    if (!result.ok) {
+      setErrorMessage(result.message);
+      return;
+    }
+
+    setProfileSaving(true);
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("users")
+      .update({
+        nickname: result.value,
+        bio: bioDraft.trim(),
+        interests: interestsDraft.trim(),
+      })
+      .eq("id", userId);
+
+    if (error) {
+      const pgErr = error as PostgrestError;
+      if (pgErr.code === "23505") {
+        setErrorMessage("そのニックネームは既に使われています。");
+      } else {
+        setErrorMessage(error.message);
+      }
+      setProfileSaving(false);
+      return;
+    }
+
+    setProfileNickname(result.value);
+    setProfileBio(bioDraft.trim());
+    setProfileInterests(interestsDraft.trim());
+    await fetchOwnPosts(userId);
+    setProfileSaving(false);
+    setProfileEditOpen(false);
+  };
+
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
@@ -352,30 +413,108 @@ export default function HomePage() {
         </div>
 
         {userId && profileReady ? (
-          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
-            <span className="font-medium">登録日:</span>{" "}
-            {joinedAtLabel ?? "不明"}
-          </div>
-        ) : null}
-
-        {userId && profileReady ? (
-          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
-            <div className="mb-2 font-medium">プロフィール画像（仮実装）</div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-                <span>{avatarUploading ? "アップロード中..." : "画像を選択"}</span>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="hidden"
-                  disabled={avatarUploading}
-                  onChange={(e) => void handleAvatarUpload(e)}
-                />
-              </label>
-              <span className="text-xs text-gray-500">2MB以下 / PNG JPG WEBP GIF</span>
+          <section className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h2 className="font-medium">プロフィール</h2>
+              <button
+                type="button"
+                onClick={() => setProfileEditOpen((prev) => !prev)}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+              >
+                プロフィール編集
+              </button>
             </div>
-          </div>
+            <div className="flex flex-wrap items-start gap-3">
+              <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="font-medium text-gray-800">
+                  {profileNickname ?? "ニックネーム未設定"}
+                </p>
+                <p className="text-xs text-gray-500">登録日: {joinedAtLabel ?? "不明"}</p>
+                {profileBio ? (
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{profileBio}</p>
+                ) : null}
+                {profileInterests ? (
+                  <p className="text-xs text-gray-600">趣味・関心: {profileInterests}</p>
+                ) : null}
+              </div>
+            </div>
+            {profileEditOpen ? (
+              <form onSubmit={handleProfileSave} className="mt-3 space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+                    <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
+                    <span>{avatarUploading ? "アップロード中..." : "画像を変更"}</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="hidden"
+                      disabled={avatarUploading}
+                      onChange={(e) => void handleAvatarUpload(e)}
+                    />
+                  </label>
+                  <span className="text-xs text-gray-500">
+                    2MB以下 / PNG JPG WEBP GIF
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">名前</label>
+                  <input
+                    value={nicknameDraft}
+                    onChange={(e) =>
+                      setNicknameDraft(e.target.value.replace(/[\n\r]/g, ""))
+                    }
+                    maxLength={20}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">
+                    自己紹介
+                  </label>
+                  <textarea
+                    value={bioDraft}
+                    onChange={(e) => setBioDraft(e.target.value)}
+                    maxLength={200}
+                    rows={3}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">
+                    趣味・関心
+                  </label>
+                  <input
+                    value={interestsDraft}
+                    onChange={(e) => setInterestsDraft(e.target.value)}
+                    maxLength={120}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={profileSaving}
+                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {profileSaving ? "保存中..." : "保存"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNicknameDraft(profileNickname ?? "");
+                      setBioDraft(profileBio);
+                      setInterestsDraft(profileInterests);
+                      setProfileEditOpen(false);
+                    }}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </section>
         ) : null}
 
         {errorMessage ? (
