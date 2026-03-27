@@ -55,7 +55,7 @@ function Avatar({
 }) {
   const sizeClass =
     size === "lg"
-      ? "h-12 w-12 text-base"
+      ? "h-24 w-24 text-2xl"
       : "h-8 w-8 text-xs";
   if (avatarUrl) {
     return (
@@ -385,24 +385,13 @@ export default function HomePage() {
             {!authReady ? (
               <span className="text-gray-500">読み込み中…</span>
             ) : userId ? (
-              <>
-                <span className="flex items-center gap-2">
-                  <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
-                  <span
-                    className="max-w-[200px] truncate text-gray-600"
-                    title={profileNickname ?? ""}
-                  >
-                    {profileNickname ?? "ニックネーム未設定"}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void signOut()}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
-                >
-                  ログアウト
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
+              >
+                ログアウト
+              </button>
             ) : null}
           </div>
         </div>
