@@ -418,7 +418,7 @@ export default function HomePage() {
                   size="lg"
                 />
                 <div className="min-w-0 space-y-1">
-                  <p className="font-medium text-gray-800">
+                  <p className="text-lg font-semibold text-gray-800">
                     {profileNickname ?? "ニックネーム未設定"}
                   </p>
                   {profileBio ? (
@@ -441,17 +441,27 @@ export default function HomePage() {
                 プロフィール編集
               </button>
             </div>
-            {profileEditOpen ? (
-              <form
-                onSubmit={handleProfileSave}
-                className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3"
-              >
-                <p className="text-xs text-gray-500">
-                  登録日: {joinedAtLabel ?? "不明"}
-                </p>
+          </section>
+        ) : null}
+
+        {profileEditOpen ? (
+          <div className="fixed inset-0 z-[70] bg-black/35 p-4">
+            <div className="mx-auto mt-10 w-full max-w-xl rounded-lg border border-gray-200 bg-white p-4 shadow-xl">
+              <form onSubmit={handleProfileSave} className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    プロフィール編集
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    登録日: {joinedAtLabel ?? "不明"}
+                  </p>
+                </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-                    <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
+                    <Avatar
+                      name={profileNickname}
+                      avatarUrl={profileAvatarUrl}
+                    />
                     <span>{avatarUploading ? "アップロード中..." : "画像を変更"}</span>
                     <input
                       type="file"
@@ -521,8 +531,8 @@ export default function HomePage() {
                   </button>
                 </div>
               </form>
-            ) : null}
-          </section>
+            </div>
+          </div>
         ) : null}
 
         {errorMessage ? (
