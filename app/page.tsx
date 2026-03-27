@@ -19,7 +19,7 @@ type Post = {
   created_at?: string;
   user_id?: string;
   /** 表示用（posts には保存せず users から解決） */
-  users?: { nickname: string | null } | null;
+  users?: { nickname: string | null; avatar_url?: string | null } | null;
 };
 
 const AUTH_TIMEOUT_MS = 15000;
@@ -84,7 +84,22 @@ function getAvatarLabel(name: string | null | undefined) {
   return value[0]!.toUpperCase();
 }
 
-function Avatar({ name }: { name: string | null | undefined }) {
+function Avatar({
+  name,
+  avatarUrl,
+}: {
+  name: string | null | undefined;
+  avatarUrl?: string | null;
+}) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name ? `${name}のアイコン` : "ユーザーアイコン"}
+        className="h-8 w-8 shrink-0 rounded-full border border-blue-100 object-cover"
+      />
+    );
+  }
   return (
     <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
       {getAvatarLabel(name)}
@@ -99,6 +114,7 @@ export default function Home() {
   const [profileReady, setProfileReady] = useState(false);
   /** null = 未設定 → ニックネーム入力が必要 */
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -168,11 +184,14 @@ export default function Home() {
       ),
     ];
 
-    const nickByUserId = new Map<string, string | null>();
+    const profileByUserId = new Map<
+      string,
+      { nickname: string | null; avatar_url: string | null }
+    >();
     if (authorIds.length > 0) {
       const { data: profiles, error: profileError } = await supabase
         .from("users")
-        .select("id, nickname")
+        .select("id, nickname, avatar_url")
         .in("id", authorIds);
 
       if (profileError) {
@@ -180,15 +199,19 @@ export default function Home() {
         return;
       }
       for (const row of profiles ?? []) {
-        nickByUserId.set(row.id, row.nickname);
+        profileByUserId.set(row.id, {
+          nickname: row.nickname,
+          avatar_url: row.avatar_url ?? null,
+        });
       }
     }
 
     const merged: Post[] = list.map((p) => ({
       ...p,
       users: {
-        nickname: p.user_id
-          ? (nickByUserId.get(p.user_id) ?? null)
+        nickname: p.user_id ? (profileByUserId.get(p.user_id)?.nickname ?? null) : null,
+        avatar_url: p.user_id
+          ? (profileByUserId.get(p.user_id)?.avatar_url ?? null)
           : null,
       },
     }));
@@ -261,7 +284,7 @@ export default function Home() {
       await ensurePublicUserRow(user);
       const { data, error } = await supabase
         .from("users")
-        .select("nickname")
+        .select("nickname, avatar_url")
         .eq("id", userId)
         .maybeSingle();
 
@@ -273,6 +296,7 @@ export default function Home() {
 
       const nick = data?.nickname ?? null;
       setProfileNickname(nick);
+      setProfileAvatarUrl(data?.avatar_url ?? null);
       setProfileReady(true);
     })();
   }, [userId, user]);
@@ -386,6 +410,7 @@ export default function Home() {
     setPosts([]);
     setLikedPostIds(new Set());
     setProfileNickname(null);
+    setProfileAvatarUrl(null);
     setProfileReady(false);
     setNicknameDraft("");
   };
@@ -549,7 +574,7 @@ export default function Home() {
               ) : userId ? (
                 <>
                   <span className="flex items-center gap-2">
-                    <Avatar name={profileNickname} />
+                  <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
                     <span
                       className="max-w-[200px] truncate text-gray-600"
                       title={profileNickname ?? ""}
@@ -845,7 +870,10 @@ export default function Home() {
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                      <Avatar name={post.users?.nickname ?? null} />
+                      <Avatar
+                        name={post.users?.nickname ?? null}
+                        avatarUrl={post.users?.avatar_url ?? null}
+                      />
                       <span>{post.users?.nickname ?? "（未設定）"}</span>
                     </div>
                   </div>

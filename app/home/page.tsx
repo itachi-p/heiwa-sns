@@ -13,7 +13,7 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
-  users?: { nickname: string | null } | null;
+  users?: { nickname: string | null; avatar_url?: string | null } | null;
 };
 
 function renderTextWithLinks(text: string) {
@@ -43,7 +43,22 @@ function getAvatarLabel(name: string | null | undefined) {
   return value[0]!.toUpperCase();
 }
 
-function Avatar({ name }: { name: string | null | undefined }) {
+function Avatar({
+  name,
+  avatarUrl,
+}: {
+  name: string | null | undefined;
+  avatarUrl?: string | null;
+}) {
+  if (avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={name ? `${name}のアイコン` : "ユーザーアイコン"}
+        className="h-8 w-8 shrink-0 rounded-full border border-blue-100 object-cover"
+      />
+    );
+  }
   return (
     <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
       {getAvatarLabel(name)}
@@ -56,6 +71,7 @@ export default function HomePage() {
   const [authReady, setAuthReady] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -66,6 +82,7 @@ export default function HomePage() {
   );
   const [blockOnSubmit, setBlockOnSubmit] = useState(true);
   const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   const userId = user?.id ?? null;
   const joinedAtLabel =
@@ -98,7 +115,7 @@ export default function HomePage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("users")
-      .select("nickname")
+      .select("nickname, avatar_url")
       .eq("id", uid)
       .maybeSingle();
 
@@ -108,13 +125,15 @@ export default function HomePage() {
     }
 
     const nickname = profile?.nickname ?? null;
+    const avatarUrl = profile?.avatar_url ?? null;
     const merged = ((rows ?? []) as Post[]).map((p) => ({
       ...p,
-      users: { nickname },
+      users: { nickname, avatar_url: avatarUrl },
     }));
 
     setPosts(merged);
     setProfileNickname(nickname);
+    setProfileAvatarUrl(avatarUrl);
     setErrorMessage(null);
   };
 
@@ -158,6 +177,7 @@ export default function HomePage() {
     }
     setPosts([]);
     setProfileNickname(null);
+    setProfileAvatarUrl(null);
     setProfileReady(false);
   };
 
@@ -237,6 +257,54 @@ export default function HomePage() {
     setSubmitting(false);
   };
 
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!userId) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setErrorMessage("画像ファイルを選択してください。");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMessage("画像サイズは2MB以下にしてください。");
+      return;
+    }
+
+    setAvatarUploading(true);
+    setErrorMessage(null);
+    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const path = `${userId}/avatar.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true });
+    if (uploadError) {
+      setErrorMessage(uploadError.message);
+      setAvatarUploading(false);
+      return;
+    }
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from("avatars").getPublicUrl(path);
+    const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
+
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({ avatar_url: cacheBustedUrl })
+      .eq("id", userId);
+    if (updateError) {
+      setErrorMessage(updateError.message);
+      setAvatarUploading(false);
+      return;
+    }
+
+    setProfileAvatarUrl(cacheBustedUrl);
+    await fetchOwnPosts(userId);
+    setAvatarUploading(false);
+    e.target.value = "";
+  };
+
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
@@ -251,7 +319,7 @@ export default function HomePage() {
             ) : userId ? (
               <>
                 <span className="flex items-center gap-2">
-                  <Avatar name={profileNickname} />
+                  <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
                   <span
                     className="max-w-[200px] truncate text-gray-600"
                     title={profileNickname ?? ""}
@@ -287,6 +355,26 @@ export default function HomePage() {
           <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
             <span className="font-medium">登録日:</span>{" "}
             {joinedAtLabel ?? "不明"}
+          </div>
+        ) : null}
+
+        {userId && profileReady ? (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+            <div className="mb-2 font-medium">プロフィール画像（仮実装）</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+                <span>{avatarUploading ? "アップロード中..." : "画像を選択"}</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  disabled={avatarUploading}
+                  onChange={(e) => void handleAvatarUpload(e)}
+                />
+              </label>
+              <span className="text-xs text-gray-500">2MB以下 / PNG JPG WEBP GIF</span>
+            </div>
           </div>
         ) : null}
 
@@ -422,7 +510,10 @@ export default function HomePage() {
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                        <Avatar name={post.users?.nickname ?? null} />
+                        <Avatar
+                          name={post.users?.nickname ?? null}
+                          avatarUrl={post.users?.avatar_url ?? null}
+                        />
                         <span>{post.users?.nickname ?? "（未設定）"}</span>
                       </div>
                       <button
