@@ -47,21 +47,29 @@ function getAvatarLabel(name: string | null | undefined) {
 function Avatar({
   name,
   avatarUrl,
+  size = "sm",
 }: {
   name: string | null | undefined;
   avatarUrl?: string | null;
+  size?: "sm" | "lg";
 }) {
+  const sizeClass =
+    size === "lg"
+      ? "h-12 w-12 text-base"
+      : "h-8 w-8 text-xs";
   if (avatarUrl) {
     return (
       <img
         src={avatarUrl}
         alt={name ? `${name}のアイコン` : "ユーザーアイコン"}
-        className="h-8 w-8 shrink-0 rounded-full border border-blue-100 object-cover"
+        className={`${sizeClass} shrink-0 rounded-full border border-blue-100 object-cover`}
       />
     );
   }
   return (
-    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
+    <span
+      className={`inline-flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700`}
+    >
       {getAvatarLabel(name)}
     </span>
   );
@@ -372,7 +380,6 @@ export default function HomePage() {
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
-            <p className="mt-1 text-sm text-gray-600">ホーム</p>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
             {!authReady ? (
@@ -413,34 +420,46 @@ export default function HomePage() {
         </div>
 
         {userId && profileReady ? (
-          <section className="mb-4 rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="font-medium">プロフィール</h2>
+          <section className="mb-4 text-sm text-gray-700">
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <div className="flex min-w-0 items-start gap-3">
+                <Avatar
+                  name={profileNickname}
+                  avatarUrl={profileAvatarUrl}
+                  size="lg"
+                />
+                <div className="min-w-0 space-y-1">
+                  <p className="font-medium text-gray-800">
+                    {profileNickname ?? "ニックネーム未設定"}
+                  </p>
+                  {profileBio ? (
+                    <p className="whitespace-pre-wrap text-sm text-gray-700">
+                      {profileBio}
+                    </p>
+                  ) : null}
+                  {profileInterests ? (
+                    <p className="text-xs text-gray-600">
+                      趣味・関心: {profileInterests}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setProfileEditOpen((prev) => !prev)}
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
               >
                 プロフィール編集
               </button>
             </div>
-            <div className="flex flex-wrap items-start gap-3">
-              <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
-              <div className="min-w-0 flex-1 space-y-1">
-                <p className="font-medium text-gray-800">
-                  {profileNickname ?? "ニックネーム未設定"}
-                </p>
-                <p className="text-xs text-gray-500">登録日: {joinedAtLabel ?? "不明"}</p>
-                {profileBio ? (
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{profileBio}</p>
-                ) : null}
-                {profileInterests ? (
-                  <p className="text-xs text-gray-600">趣味・関心: {profileInterests}</p>
-                ) : null}
-              </div>
-            </div>
             {profileEditOpen ? (
-              <form onSubmit={handleProfileSave} className="mt-3 space-y-3">
+              <form
+                onSubmit={handleProfileSave}
+                className="mt-3 space-y-3 rounded-lg border border-gray-200 bg-white p-3"
+              >
+                <p className="text-xs text-gray-500">
+                  登録日: {joinedAtLabel ?? "不明"}
+                </p>
                 <div className="flex flex-wrap items-center gap-3">
                   <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
                     <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />

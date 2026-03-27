@@ -854,9 +854,6 @@ export default function Home() {
             ) : null}
 
             <section>
-              <h2 className="mb-2 text-sm font-semibold text-gray-700">
-                タイムライン（他ユーザー）
-              </h2>
               {timelinePosts.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   他ユーザーの投稿はまだありません。
