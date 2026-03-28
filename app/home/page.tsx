@@ -1098,7 +1098,7 @@ export default function HomePage() {
               id="interest-confirm-lead"
               className="mb-3 text-sm text-gray-700"
             >
-              「{interestConfirm.label}」はデータベースにあります（他ユーザーが登録した語も選べます）。
+              「{interestConfirm.label}」は既に登録されています。
             </p>
           ) : (
             <p id="interest-confirm-lead" className="mb-3 text-sm text-gray-700">
