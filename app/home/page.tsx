@@ -118,6 +118,7 @@ export default function HomePage() {
   const [blockOnSubmit, setBlockOnSubmit] = useState(true);
   const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [interestPlusPending, setInterestPlusPending] = useState(false);
   const profileEditOpenRef = useRef(false);
 
   const userId = user?.id ?? null;
@@ -536,7 +537,7 @@ export default function HomePage() {
 
   const handleInterestPlusClick = async () => {
     setErrorMessage(null);
-    if (!userId) return;
+    if (!userId || interestConfirm != null || interestPlusPending) return;
     if (interestDraft.length >= MAX_INTEREST_TAGS) {
       setErrorMessage(`趣味・関心は${MAX_INTEREST_TAGS}つまでです。`);
       return;
@@ -559,70 +560,75 @@ export default function HomePage() {
       return;
     }
 
-    const { data: existingId, error: rpcErr } = await supabase.rpc(
-      "interest_tag_id_by_normalized_label",
-      { p_label: value }
-    );
-    if (rpcErr) {
-      setErrorMessage(rpcErr.message);
-      return;
-    }
-
-    if (existingId) {
-      const eid = existingId as string;
-      if (interestDraft.some((p) => p.id === eid)) {
-        setErrorMessage("すでに追加されています。");
+    setInterestPlusPending(true);
+    try {
+      const { data: existingId, error: rpcErr } = await supabase.rpc(
+        "interest_tag_id_by_normalized_label",
+        { p_label: value }
+      );
+      if (rpcErr) {
+        setErrorMessage(rpcErr.message);
         return;
       }
-      const { data: freshRows, error: freshErr } = await supabase
-        .from("interest_tags")
-        .select("id, label")
-        .order("label");
-      if (!freshErr && freshRows && freshRows.length > 0) {
-        const catalog = freshRows as InterestPick[];
-        const refreshedHits = filterPresetRows(
-          catalog,
-          interestSearchQuery,
-          draftTagIdSet
-        );
-        setPresetRows(catalog);
-        if (refreshedHits.length > 0) {
+
+      if (existingId) {
+        const eid = existingId as string;
+        if (interestDraft.some((p) => p.id === eid)) {
+          setErrorMessage("すでに追加されています。");
           return;
         }
-      }
-      let labelForPick =
-        freshRows?.find((r) => r.id === eid)?.label ??
-        presetRows.find((p) => p.id === eid)?.label;
-      if (!labelForPick) {
-        const { data: row } = await supabase
+        const { data: freshRows, error: freshErr } = await supabase
           .from("interest_tags")
-          .select("label")
-          .eq("id", eid)
-          .maybeSingle();
-        labelForPick = row?.label;
+          .select("id, label")
+          .order("label");
+        if (!freshErr && freshRows && freshRows.length > 0) {
+          const catalog = freshRows as InterestPick[];
+          const refreshedHits = filterPresetRows(
+            catalog,
+            interestSearchQuery,
+            draftTagIdSet
+          );
+          setPresetRows(catalog);
+          if (refreshedHits.length > 0) {
+            return;
+          }
+        }
+        let labelForPick =
+          freshRows?.find((r) => r.id === eid)?.label ??
+          presetRows.find((p) => p.id === eid)?.label;
+        if (!labelForPick) {
+          const { data: row } = await supabase
+            .from("interest_tags")
+            .select("label")
+            .eq("id", eid)
+            .maybeSingle();
+          labelForPick = row?.label;
+        }
+        const labelResolved = labelForPick ?? value;
+        setInterestConfirm({
+          kind: "existing",
+          label: labelResolved,
+          tagId: eid,
+        });
+        return;
       }
-      const labelResolved = labelForPick ?? value;
-      setInterestConfirm({
-        kind: "existing",
-        label: labelResolved,
-        tagId: eid,
-      });
-      return;
-    }
 
-    const insertsRemaining =
-      MAX_CUSTOM_INTEREST_REGISTRATIONS - customCreationsUsed;
-    if (insertsRemaining <= 0) {
-      setErrorMessage(
-        `一覧にない新しい語の登録は${MAX_CUSTOM_INTEREST_REGISTRATIONS}つまでです。`
-      );
-      return;
+      const insertsRemaining =
+        MAX_CUSTOM_INTEREST_REGISTRATIONS - customCreationsUsed;
+      if (insertsRemaining <= 0) {
+        setErrorMessage(
+          `一覧にない新しい語の登録は${MAX_CUSTOM_INTEREST_REGISTRATIONS}つまでです。`
+        );
+        return;
+      }
+      setInterestConfirm({
+        kind: "new",
+        label: value,
+        insertsRemaining,
+      });
+    } finally {
+      setInterestPlusPending(false);
     }
-    setInterestConfirm({
-      kind: "new",
-      label: value,
-      insertsRemaining,
-    });
   };
 
   const confirmCustomInterest = async () => {
@@ -839,7 +845,7 @@ export default function HomePage() {
                     趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
                   </label>
                   <p className="text-xs text-gray-500">
-                    検索結果リストにない言葉は「＋」から追加できます。
+                    検索結果リストにない言葉は「＋」から追加できます。プロフィールへの反映は「保存」後です。
                   </p>
                   <div className="flex min-h-[1.75rem] flex-wrap gap-1.5">
                     {interestDraft.map((pick) => (
@@ -870,7 +876,10 @@ export default function HomePage() {
                         setInterestConfirm(null);
                       }}
                       maxLength={MAX_CUSTOM_INTEREST_LEN}
-                      disabled={interestDraft.length >= MAX_INTEREST_TAGS}
+                      disabled={
+                        interestDraft.length >= MAX_INTEREST_TAGS ||
+                        interestConfirm != null
+                      }
                       placeholder="キーワードで検索"
                       className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
                     />
@@ -880,12 +889,14 @@ export default function HomePage() {
                       disabled={
                         interestDraft.length >= MAX_INTEREST_TAGS ||
                         !normalizeInterestInput(interestSearchQuery) ||
-                        presetSearchHits.length > 0
+                        presetSearchHits.length > 0 ||
+                        interestConfirm != null ||
+                        interestPlusPending
                       }
                       title="検索で0件のときだけ、入力中の言葉を追加できます"
                       onClick={() => void handleInterestPlusClick()}
                     >
-                      ＋
+                      {interestPlusPending ? "…" : "＋"}
                     </button>
                   </div>
                   {normalizeInterestInput(interestSearchQuery) &&
@@ -1094,8 +1105,9 @@ export default function HomePage() {
             )}
             <button
               type="button"
+              disabled={interestConfirm != null}
               onClick={() => setComposeOpen((prev) => !prev)}
-              className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700"
+              className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700 disabled:pointer-events-none disabled:opacity-30"
               aria-label="投稿フォームを開く"
               title="投稿"
             >
@@ -1107,7 +1119,7 @@ export default function HomePage() {
     </main>
     {interestConfirm ? (
       <div
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4"
+        className="fixed inset-0 z-[200] flex items-center justify-center bg-black/45 p-4"
         role="presentation"
         onClick={() => setInterestConfirm(null)}
       >
