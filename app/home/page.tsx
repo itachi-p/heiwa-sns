@@ -150,44 +150,55 @@ export default function HomePage() {
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
+    const profileRes = await supabase
       .from("users")
       .select("nickname, avatar_url, bio, interest_custom_creations_count")
       .eq("id", uid)
       .maybeSingle();
 
-    if (profileError) {
-      setErrorMessage(profileError.message);
-      return;
+    type ProfileRow = {
+      nickname: string | null;
+      avatar_url: string | null;
+      bio: string | null;
+      interest_custom_creations_count?: number | null;
+    };
+
+    let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
+    if (profileRes.error) {
+      const fallback = await supabase
+        .from("users")
+        .select("nickname, avatar_url, bio")
+        .eq("id", uid)
+        .maybeSingle();
+      if (fallback.error) {
+        setErrorMessage(fallback.error.message);
+        return;
+      }
+      profile = fallback.data as ProfileRow | null;
     }
 
-    const { data: presetData, error: presetError } = await supabase
+    const presetRes = await supabase
       .from("interest_tags")
       .select("id, label")
       .eq("is_preset", true)
       .order("label");
 
-    if (presetError) {
-      setErrorMessage(
-        `${presetError.message}（Supabase に interest_tags 用マイグレーションを適用してください）`
-      );
-      return;
-    }
+    const presetData = presetRes.data;
+    const presetWarning = presetRes.error
+      ? `${presetRes.error.message}（interest_tags 未適用の可能性。趣味・関心の一覧が使えません。）`
+      : null;
 
-    const { data: uiData, error: uiError } = await supabase
+    const uiRes = await supabase
       .from("user_interests")
       .select("position, tag_id, interest_tags ( label )")
       .eq("user_id", uid)
       .order("position", { ascending: true });
 
-    if (uiError) {
-      setErrorMessage(
-        `${uiError.message}（user_interests 用マイグレーションを適用してください）`
-      );
-      return;
-    }
+    const uiWarning = uiRes.error
+      ? `${uiRes.error.message}（user_interests 未適用の可能性。趣味・関心は空表示になります。）`
+      : null;
 
-    const picks: InterestPick[] = (uiData ?? []).map((row) => {
+    const picks: InterestPick[] = (uiRes.data ?? []).map((row) => {
       const rel = row.interest_tags as
         | { label: string }
         | { label: string }[]
@@ -225,7 +236,9 @@ export default function HomePage() {
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
     setBioDraft(bio);
-    setErrorMessage(null);
+
+    const warn = [presetWarning, uiWarning].filter(Boolean).join(" ");
+    setErrorMessage(warn || null);
   };
 
   useEffect(() => {
