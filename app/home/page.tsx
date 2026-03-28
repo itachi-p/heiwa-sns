@@ -737,44 +737,59 @@ export default function HomePage() {
 
         {userId && profileReady ? (
           <section className="mb-4 text-sm text-gray-700">
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-start gap-3">
-                <Avatar
-                  name={profileNickname}
-                  avatarUrl={profileAvatarUrl}
-                  size="lg"
-                />
-                <div className="min-w-0 space-y-1">
-                  <p className="text-lg font-semibold text-gray-800">
+            <div className="flex min-w-0 items-start gap-3">
+              <Avatar
+                name={profileNickname}
+                avatarUrl={profileAvatarUrl}
+                size="lg"
+              />
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <p className="min-w-0 truncate text-lg font-semibold text-gray-800">
                     {profileNickname ?? "ニックネーム未設定"}
                   </p>
-                  {profileBio ? (
-                    <p className="whitespace-pre-wrap text-sm text-gray-700">
-                      {profileBio}
-                    </p>
-                  ) : null}
-                  {interestPicksServer.length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
-                      <span className="shrink-0">趣味・関心:</span>
-                      {interestPicksServer.map((p) => (
-                        <span
-                          key={p.id}
-                          className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
-                        >
-                          {p.label}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => toggleProfileEdit()}
+                    className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 sm:p-0 sm:px-2 sm:py-1"
+                    aria-label="プロフィールを編集"
+                    title="プロフィールを編集"
+                  >
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    <span className="hidden text-xs sm:inline">編集</span>
+                  </button>
                 </div>
+                {profileBio ? (
+                  <p className="whitespace-pre-wrap text-sm text-gray-700">
+                    {profileBio}
+                  </p>
+                ) : null}
+                {interestPicksServer.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+                    <span className="shrink-0">趣味・関心:</span>
+                    {interestPicksServer.map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
+                      >
+                        {p.label}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => toggleProfileEdit()}
-                className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-              >
-                プロフィール編集
-              </button>
             </div>
           </section>
         ) : null}
