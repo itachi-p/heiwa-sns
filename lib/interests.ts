@@ -14,11 +14,44 @@ export function normalizeInterestInput(s: string): string {
   return s.replace(/[\n\r]/g, "").trim().replace(/\s+/g, " ");
 }
 
+/** ひらがな・カタカナ（全角・半角）の1文字だけは登録不可。「詩」など1文字の漢字は可 */
+function isSingleKanaChar(s: string): boolean {
+  const chars = [...s];
+  if (chars.length !== 1) return false;
+  const cp = chars[0]!.codePointAt(0)!;
+  if (cp >= 0x3040 && cp <= 0x309f) return true;
+  if (cp >= 0x30a0 && cp <= 0x30ff) return true;
+  if (cp >= 0xff66 && cp <= 0xff9f) return true;
+  return false;
+}
+
+/** 「ああ」「いいい」のように同じ文字の繰り返しだけ */
+function isOnlyRepeatedSingleCharacter(s: string): boolean {
+  const chars = [...s];
+  if (chars.length < 2) return false;
+  const first = chars[0]!;
+  return chars.every((c) => c === first);
+}
+
 export function validateCustomInterestText(raw: string): string | null {
   const s = normalizeInterestInput(raw);
   if (!s) return "言葉を入力してください。";
   if (s.length > MAX_CUSTOM_INTEREST_LEN) {
     return `一覧にない言葉は${MAX_CUSTOM_INTEREST_LEN}文字以内にしてください。`;
+  }
+  return null;
+}
+
+/** 長さチェックに加え、無意味な仮名1文字・同一文字連打を弾く */
+export function validateInterestLabelForRegistration(raw: string): string | null {
+  const basic = validateCustomInterestText(raw);
+  if (basic) return basic;
+  const s = normalizeInterestInput(raw);
+  if (isOnlyRepeatedSingleCharacter(s)) {
+    return "同じ文字だけの連続では登録できません。";
+  }
+  if (isSingleKanaChar(s)) {
+    return "1文字の仮名だけでは登録できません。";
   }
   return null;
 }

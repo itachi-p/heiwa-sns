@@ -1,5 +1,5 @@
 -- 趣味・関心: 共有の interest_tags + ユーザーごとの user_interests（最大3件）
--- users.interests テキスト列は廃止せず残すが、アプリは本テーブルを正とする
+-- users.interests はレガシー列。正本は user_interests。移行は 20260329100000_backfill_*.sql
 
 create table public.interest_tags (
   id uuid primary key default gen_random_uuid(),

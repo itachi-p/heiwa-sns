@@ -11,7 +11,7 @@ import {
   MAX_INTEREST_TAGS,
   type InterestPick,
   normalizeInterestInput,
-  validateCustomInterestText,
+  validateInterestLabelForRegistration,
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
 
@@ -516,7 +516,7 @@ export default function HomePage() {
       : [];
     if (hits.length > 0) return;
 
-    const err = validateCustomInterestText(interestSearchQuery);
+    const err = validateInterestLabelForRegistration(interestSearchQuery);
     if (err) {
       setErrorMessage(err);
       return;
@@ -578,6 +578,13 @@ export default function HomePage() {
   const confirmCustomInterest = async () => {
     if (!interestConfirm || !userId) return;
     setErrorMessage(null);
+
+    const quality = validateInterestLabelForRegistration(interestConfirm.label);
+    if (quality) {
+      setErrorMessage(quality);
+      setInterestConfirm(null);
+      return;
+    }
 
     const finish = () => {
       setInterestConfirm(null);
