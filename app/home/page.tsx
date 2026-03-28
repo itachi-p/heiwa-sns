@@ -561,6 +561,24 @@ export default function HomePage() {
 
     setInterestPlusPending(true);
     try {
+      let catalog: InterestPick[] = presetRows;
+      const { data: freshRows, error: freshErr } = await supabase
+        .from("interest_tags")
+        .select("id, label")
+        .order("label");
+      if (!freshErr && freshRows && freshRows.length > 0) {
+        catalog = freshRows as InterestPick[];
+        setPresetRows(catalog);
+      }
+      const hitsFresh = filterPresetRows(
+        catalog,
+        interestSearchQuery,
+        draftTagIdSet
+      );
+      if (hitsFresh.length > 0) {
+        return;
+      }
+
       const { data: existingId, error: rpcErr } = await supabase.rpc(
         "interest_tag_id_by_normalized_label",
         { p_label: value }
@@ -576,38 +594,7 @@ export default function HomePage() {
           setErrorMessage("すでに追加されています。");
           return;
         }
-        const { data: freshRows, error: freshErr } = await supabase
-          .from("interest_tags")
-          .select("id, label")
-          .order("label");
-        if (!freshErr && freshRows && freshRows.length > 0) {
-          const catalog = freshRows as InterestPick[];
-          const refreshedHits = filterPresetRows(
-            catalog,
-            interestSearchQuery,
-            draftTagIdSet
-          );
-          setPresetRows(catalog);
-          if (refreshedHits.length > 0) {
-            return;
-          }
-        }
-        let labelForPick =
-          freshRows?.find((r) => r.id === eid)?.label ??
-          presetRows.find((p) => p.id === eid)?.label;
-        if (!labelForPick) {
-          const { data: row } = await supabase
-            .from("interest_tags")
-            .select("label")
-            .eq("id", eid)
-            .maybeSingle();
-          labelForPick = row?.label;
-        }
-        mergeCatalogPick({
-          id: eid,
-          label: labelForPick ?? value,
-        });
-        setErrorMessage("一覧に表示できませんでした。再読み込みしてください。");
+        setErrorMessage("再読み込みしてください。");
         return;
       }
 
