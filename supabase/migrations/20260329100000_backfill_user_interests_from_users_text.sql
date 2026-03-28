@@ -1,4 +1,5 @@
--- 旧 users.interests（自由文・JSON配列・カンマ区切り）から user_interests / interest_tags へ移行する。
+-- 旧 users.interests から user_interests / interest_tags へ一度移す（中間ステップ）。
+-- 最終形は 20260329120000 で user_interests 廃止・users.interests へ再集約。
 -- すでに user_interests に行があるユーザーはスキップ（冪等）。
 -- 移行できたユーザーは interests を NULL にし、アプリの正本を user_interests のみに揃える。
 

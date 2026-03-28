@@ -1,5 +1,5 @@
--- 趣味・関心: 共有の interest_tags + ユーザーごとの user_interests（最大3件）
--- users.interests はレガシー列。正本は user_interests。移行は 20260329100000_backfill_*.sql
+-- 共有の interest_tags（プリセット＋カスタム語のマスタ）
+-- ユーザーごとの選択は users.interests（テキスト）と interest_custom_creations_count。user_interests は 20260329120000 で廃止。
 
 create table public.interest_tags (
   id uuid primary key default gen_random_uuid(),
