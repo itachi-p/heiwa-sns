@@ -1,5 +1,5 @@
--- 共有の interest_tags（プリセット＋カスタム語のマスタ）
--- ユーザーごとの選択は users.interests（テキスト）と interest_custom_creations_count。user_interests は 20260329120000 で廃止。
+-- 共有の interest_tags（プリセット＋カスタム語のマスタ）と user_interests（選択は tag_id のみ）
+-- users に趣味テキスト列は置かない（20260329140000 で interests 列を削除）
 
 create table public.interest_tags (
   id uuid primary key default gen_random_uuid(),

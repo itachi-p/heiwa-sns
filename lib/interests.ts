@@ -1,4 +1,4 @@
-/** プロフィールに選べる趣味・関心の語数（users.interests の上限） */
+/** プロフィールに選べる趣味・関心のタグ数（user_interests の上限） */
 export const MAX_INTEREST_TAGS = 3;
 
 /**
@@ -58,48 +58,14 @@ export function validateInterestLabelForRegistration(raw: string): string | null
 
 export type InterestPick = { id: string; label: string };
 
-/** users.interests 列（カンマ・読点区切り）を最大3語にパース */
-export function parseInterestLabelsFromUsersColumn(
-  raw: string | null | undefined
-): string[] {
-  if (!raw?.trim()) return [];
-  const parts = raw
-    .split(/[,、]/)
-    .map((s) => normalizeInterestInput(s))
-    .filter(Boolean);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const p of parts) {
-    const n = normalizeInterestInput(p);
-    if (seen.has(n)) continue;
-    seen.add(n);
-    out.push(n);
-    if (out.length >= MAX_INTEREST_TAGS) break;
-  }
-  return out;
-}
-
-export function serializeInterestLabelsToUsersColumn(labels: string[]): string {
-  const cleaned = labels
-    .map((x) => normalizeInterestInput(x))
-    .filter(Boolean)
-    .slice(0, MAX_INTEREST_TAGS);
-  return cleaned.join(",");
-}
-
 export function filterPresetRows(
   presets: InterestPick[],
   query: string,
-  excludeLabels: Set<string>
+  excludeTagIds: Set<string>
 ): InterestPick[] {
   const q = normalizeInterestInput(query);
   if (!q) return [];
-  const ex = new Set(
-    [...excludeLabels].map((x) => normalizeInterestInput(x))
-  );
   return presets.filter(
-    (p) =>
-      p.label.includes(q) &&
-      !ex.has(normalizeInterestInput(p.label))
+    (p) => p.label.includes(q) && !excludeTagIds.has(p.id)
   );
 }

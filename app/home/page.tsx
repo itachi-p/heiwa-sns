@@ -11,8 +11,6 @@ import {
   MAX_INTEREST_TAGS,
   type InterestPick,
   normalizeInterestInput,
-  parseInterestLabelsFromUsersColumn,
-  serializeInterestLabelsToUsersColumn,
   validateInterestLabelForRegistration,
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
@@ -96,10 +94,10 @@ export default function HomePage() {
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
   const [presetRows, setPresetRows] = useState<InterestPick[]>([]);
-  const [interestLabelsServer, setInterestLabelsServer] = useState<string[]>(
-    []
-  );
-  const [interestLabelsDraft, setInterestLabelsDraft] = useState<string[]>([]);
+  const [interestPicksServer, setInterestPicksServer] = useState<
+    InterestPick[]
+  >([]);
+  const [interestDraft, setInterestDraft] = useState<InterestPick[]>([]);
   const [customCreationsUsed, setCustomCreationsUsed] = useState(0);
   const [interestSearchQuery, setInterestSearchQuery] = useState("");
   const [interestConfirm, setInterestConfirm] = useState<{
@@ -154,9 +152,7 @@ export default function HomePage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("users")
-      .select(
-        "nickname, avatar_url, bio, interests, interest_custom_creations_count"
-      )
+      .select("nickname, avatar_url, bio, interest_custom_creations_count")
       .eq("id", uid)
       .maybeSingle();
 
@@ -178,7 +174,32 @@ export default function HomePage() {
       return;
     }
 
-    const labels = parseInterestLabelsFromUsersColumn(profile?.interests);
+    const { data: uiData, error: uiError } = await supabase
+      .from("user_interests")
+      .select("position, tag_id, interest_tags ( label )")
+      .eq("user_id", uid)
+      .order("position", { ascending: true });
+
+    if (uiError) {
+      setErrorMessage(
+        `${uiError.message}（user_interests 用マイグレーションを適用してください）`
+      );
+      return;
+    }
+
+    const picks: InterestPick[] = (uiData ?? []).map((row) => {
+      const rel = row.interest_tags as
+        | { label: string }
+        | { label: string }[]
+        | null
+        | undefined;
+      const label = Array.isArray(rel) ? rel[0]?.label : rel?.label;
+      return {
+        id: String(row.tag_id),
+        label: label ?? "",
+      };
+    }).filter((p) => p.label);
+
     const creations =
       typeof profile?.interest_custom_creations_count === "number"
         ? profile.interest_custom_creations_count
@@ -197,9 +218,9 @@ export default function HomePage() {
     setProfileAvatarUrl(avatarUrl);
     setProfileBio(bio);
     setPresetRows((presetData ?? []) as InterestPick[]);
-    setInterestLabelsServer(labels);
+    setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
-      setInterestLabelsDraft(labels);
+      setInterestDraft(picks);
     }
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
@@ -254,8 +275,8 @@ export default function HomePage() {
     setProfileAvatarUrl(null);
     setProfileBio("");
     setPresetRows([]);
-    setInterestLabelsServer([]);
-    setInterestLabelsDraft([]);
+    setInterestPicksServer([]);
+    setInterestDraft([]);
     setCustomCreationsUsed(0);
     setNicknameDraft("");
     setBioDraft("");
@@ -402,12 +423,39 @@ export default function HomePage() {
     setProfileSaving(true);
     setErrorMessage(null);
 
+    const { error: delUiError } = await supabase
+      .from("user_interests")
+      .delete()
+      .eq("user_id", userId);
+
+    if (delUiError) {
+      setErrorMessage(delUiError.message);
+      setProfileSaving(false);
+      return;
+    }
+
+    if (interestDraft.length > 0) {
+      const insertRows = interestDraft.map((p, i) => ({
+        user_id: userId,
+        tag_id: p.id,
+        position: i + 1,
+      }));
+      const { error: insUiError } = await supabase
+        .from("user_interests")
+        .insert(insertRows);
+
+      if (insUiError) {
+        setErrorMessage(insUiError.message);
+        setProfileSaving(false);
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from("users")
       .update({
         nickname: result.value,
         bio: bioDraft.trim(),
-        interests: serializeInterestLabelsToUsersColumn(interestLabelsDraft),
         interest_custom_creations_count: customCreationsUsed,
       })
       .eq("id", userId);
@@ -433,7 +481,7 @@ export default function HomePage() {
   const toggleProfileEdit = () => {
     setProfileEditOpen((prev) => {
       if (!prev) {
-        setInterestLabelsDraft([...interestLabelsServer]);
+        setInterestDraft([...interestPicksServer]);
         setInterestSearchQuery("");
         setInterestConfirm(null);
       }
@@ -441,45 +489,39 @@ export default function HomePage() {
     });
   };
 
-  const addPickByLabel = (label: string) => {
-    const n = normalizeInterestInput(label);
-    setInterestLabelsDraft((prev) => {
-      if (prev.some((x) => normalizeInterestInput(x) === n)) return prev;
+  const addPickById = (id: string, label: string) => {
+    setInterestDraft((prev) => {
+      if (prev.some((p) => p.id === id)) return prev;
       if (prev.length >= MAX_INTEREST_TAGS) return prev;
-      return [...prev, n];
+      return [...prev, { id, label }];
     });
     setInterestSearchQuery("");
     setInterestConfirm(null);
   };
 
   const addPresetPick = (pick: InterestPick) => {
-    addPickByLabel(pick.label);
+    addPickById(pick.id, pick.label);
   };
 
-  const removeInterestPick = (label: string) => {
-    const n = normalizeInterestInput(label);
-    setInterestLabelsDraft((prev) =>
-      prev.filter((x) => normalizeInterestInput(x) !== n)
-    );
+  const removeInterestPick = (id: string) => {
+    setInterestDraft((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const draftLabelSet = new Set(
-    interestLabelsDraft.map((x) => normalizeInterestInput(x))
-  );
+  const draftTagIdSet = new Set(interestDraft.map((p) => p.id));
 
   const presetSearchHits = normalizeInterestInput(interestSearchQuery)
-    ? filterPresetRows(presetRows, interestSearchQuery, draftLabelSet)
+    ? filterPresetRows(presetRows, interestSearchQuery, draftTagIdSet)
     : [];
 
   const handleInterestPlusClick = async () => {
     setErrorMessage(null);
     if (!userId) return;
-    if (interestLabelsDraft.length >= MAX_INTEREST_TAGS) {
+    if (interestDraft.length >= MAX_INTEREST_TAGS) {
       setErrorMessage(`趣味・関心は${MAX_INTEREST_TAGS}つまでです。`);
       return;
     }
     const hits = normalizeInterestInput(interestSearchQuery)
-      ? filterPresetRows(presetRows, interestSearchQuery, draftLabelSet)
+      ? filterPresetRows(presetRows, interestSearchQuery, draftTagIdSet)
       : [];
     if (hits.length > 0) return;
 
@@ -489,7 +531,9 @@ export default function HomePage() {
       return;
     }
     const value = normalizeInterestInput(interestSearchQuery);
-    if (interestLabelsDraft.some((x) => normalizeInterestInput(x) === value)) {
+    if (
+      interestDraft.some((p) => normalizeInterestInput(p.label) === value)
+    ) {
       setErrorMessage("すでに追加されています。");
       return;
     }
@@ -504,10 +548,15 @@ export default function HomePage() {
     }
 
     if (existingId) {
+      const eid = existingId as string;
+      if (interestDraft.some((p) => p.id === eid)) {
+        setErrorMessage("すでに追加されています。");
+        return;
+      }
       setInterestConfirm({
         kind: "existing",
         label: value,
-        tagId: existingId as string,
+        tagId: eid,
       });
       return;
     }
@@ -543,7 +592,7 @@ export default function HomePage() {
     };
 
     if (interestConfirm.kind === "existing" && interestConfirm.tagId) {
-      addPickByLabel(interestConfirm.label);
+      addPickById(interestConfirm.tagId, interestConfirm.label);
       finish();
       return;
     }
@@ -565,7 +614,7 @@ export default function HomePage() {
           { p_label: interestConfirm.label }
         );
         if (raceId) {
-          addPickByLabel(interestConfirm.label);
+          addPickById(raceId as string, interestConfirm.label);
           finish();
           return;
         }
@@ -586,7 +635,7 @@ export default function HomePage() {
           return;
         }
         setCustomCreationsUsed(nextCount);
-        addPickByLabel(inserted.label);
+        addPickById(inserted.id, inserted.label);
       }
       finish();
     }
@@ -645,10 +694,10 @@ export default function HomePage() {
                       {profileBio}
                     </p>
                   ) : null}
-                  {interestLabelsServer.length > 0 ? (
+                  {interestPicksServer.length > 0 ? (
                     <p className="text-xs text-gray-600">
                       趣味・関心:{" "}
-                      {interestLabelsServer.join(" · ")}
+                      {interestPicksServer.map((p) => p.label).join(" · ")}
                     </p>
                   ) : null}
                 </div>
@@ -729,17 +778,17 @@ export default function HomePage() {
                     検索結果リストにない言葉は「＋」から追加できます。
                   </p>
                   <div className="flex min-h-[1.75rem] flex-wrap gap-1.5">
-                    {interestLabelsDraft.map((lab) => (
+                    {interestDraft.map((pick) => (
                       <span
-                        key={lab}
+                        key={pick.id}
                         className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
                       >
-                        {lab}
+                        {pick.label}
                         <button
                           type="button"
                           className="rounded px-0.5 text-blue-700 hover:bg-blue-200/80"
-                          aria-label={`${lab}を削除`}
-                          onClick={() => removeInterestPick(lab)}
+                          aria-label={`${pick.label}を削除`}
+                          onClick={() => removeInterestPick(pick.id)}
                         >
                           ×
                         </button>
@@ -757,7 +806,7 @@ export default function HomePage() {
                         setInterestConfirm(null);
                       }}
                       maxLength={MAX_CUSTOM_INTEREST_LEN}
-                      disabled={interestLabelsDraft.length >= MAX_INTEREST_TAGS}
+                      disabled={interestDraft.length >= MAX_INTEREST_TAGS}
                       placeholder="キーワードで検索"
                       className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
                     />
@@ -765,7 +814,7 @@ export default function HomePage() {
                       type="button"
                       className="shrink-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-lg font-medium leading-none text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       disabled={
-                        interestLabelsDraft.length >= MAX_INTEREST_TAGS ||
+                        interestDraft.length >= MAX_INTEREST_TAGS ||
                         !normalizeInterestInput(interestSearchQuery) ||
                         presetSearchHits.length > 0
                       }
@@ -785,7 +834,7 @@ export default function HomePage() {
                             className="w-full px-3 py-2 text-left hover:bg-white"
                             onClick={() => addPresetPick(pick)}
                             disabled={
-                              interestLabelsDraft.length >= MAX_INTEREST_TAGS
+                              interestDraft.length >= MAX_INTEREST_TAGS
                             }
                           >
                             {pick.label}
@@ -808,7 +857,7 @@ export default function HomePage() {
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
-                      setInterestLabelsDraft([...interestLabelsServer]);
+                      setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
                       setProfileEditOpen(false);
