@@ -58,6 +58,10 @@ export function validateInterestLabelForRegistration(raw: string): string | null
 
 export type InterestPick = { id: string; label: string };
 
+/**
+ * 検索ヒット: 部分一致、または interest_tag_id_by_normalized_label と同様の正規化一致。
+ * （大文字小文字・前後空白の違いで「一覧に出ないのに＋は押せる」を防ぐ）
+ */
 export function filterPresetRows(
   presets: InterestPick[],
   query: string,
@@ -65,7 +69,10 @@ export function filterPresetRows(
 ): InterestPick[] {
   const q = normalizeInterestInput(query);
   if (!q) return [];
-  return presets.filter(
-    (p) => p.label.includes(q) && !excludeTagIds.has(p.id)
-  );
+  const qKey = q.toLowerCase();
+  return presets.filter((p) => {
+    if (excludeTagIds.has(p.id)) return false;
+    if (p.label.includes(q)) return true;
+    return normalizeInterestInput(p.label).toLowerCase() === qKey;
+  });
 }

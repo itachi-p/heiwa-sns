@@ -101,10 +101,8 @@ export default function HomePage() {
   const [customCreationsUsed, setCustomCreationsUsed] = useState(0);
   const [interestSearchQuery, setInterestSearchQuery] = useState("");
   const [interestConfirm, setInterestConfirm] = useState<{
-    kind: "new" | "existing";
     label: string;
-    tagId?: string;
-    insertsRemaining?: number;
+    insertsRemaining: number;
   } | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -575,11 +573,18 @@ export default function HomePage() {
         setErrorMessage("すでに追加されています。");
         return;
       }
-      setInterestConfirm({
-        kind: "existing",
-        label: value,
-        tagId: eid,
-      });
+      let labelForPick = presetRows.find((p) => p.id === eid)?.label;
+      if (!labelForPick) {
+        const { data: row } = await supabase
+          .from("interest_tags")
+          .select("label")
+          .eq("id", eid)
+          .maybeSingle();
+        labelForPick = row?.label;
+      }
+      const labelResolved = labelForPick ?? value;
+      addPickById(eid, labelResolved);
+      mergeCatalogPick({ id: eid, label: labelResolved });
       return;
     }
 
@@ -592,7 +597,6 @@ export default function HomePage() {
       return;
     }
     setInterestConfirm({
-      kind: "new",
       label: value,
       insertsRemaining,
     });
@@ -613,63 +617,59 @@ export default function HomePage() {
       setInterestConfirm(null);
     };
 
-    if (interestConfirm.kind === "existing" && interestConfirm.tagId) {
-      addPickById(interestConfirm.tagId, interestConfirm.label);
-      mergeCatalogPick({
-        id: interestConfirm.tagId,
+    const { data: inserted, error: insErr } = await supabase
+      .from("interest_tags")
+      .insert({
         label: interestConfirm.label,
-      });
+        is_preset: false,
+        created_by: userId,
+      })
+      .select("id, label")
+      .maybeSingle();
+
+    if (insErr) {
+      const { data: raceId } = await supabase.rpc(
+        "interest_tag_id_by_normalized_label",
+        { p_label: interestConfirm.label }
+      );
+      if (raceId) {
+        const rid = raceId as string;
+        let raceLabel = presetRows.find((p) => p.id === rid)?.label;
+        if (!raceLabel) {
+          const { data: row } = await supabase
+            .from("interest_tags")
+            .select("label")
+            .eq("id", rid)
+            .maybeSingle();
+          raceLabel = row?.label;
+        }
+        const raceResolved = raceLabel ?? interestConfirm.label;
+        addPickById(rid, raceResolved);
+        mergeCatalogPick({ id: rid, label: raceResolved });
+        finish();
+        return;
+      }
+      setErrorMessage(insErr.message);
       finish();
       return;
     }
 
-    if (interestConfirm.kind === "new") {
-      const { data: inserted, error: insErr } = await supabase
-        .from("interest_tags")
-        .insert({
-          label: interestConfirm.label,
-          is_preset: false,
-          created_by: userId,
-        })
-        .select("id, label")
-        .maybeSingle();
-
-      if (insErr) {
-        const { data: raceId } = await supabase.rpc(
-          "interest_tag_id_by_normalized_label",
-          { p_label: interestConfirm.label }
-        );
-        if (raceId) {
-          addPickById(raceId as string, interestConfirm.label);
-          mergeCatalogPick({
-            id: raceId as string,
-            label: interestConfirm.label,
-          });
-          finish();
-          return;
-        }
-        setErrorMessage(insErr.message);
+    if (inserted) {
+      const nextCount = customCreationsUsed + 1;
+      const { error: cntErr } = await supabase
+        .from("users")
+        .update({ interest_custom_creations_count: nextCount })
+        .eq("id", userId);
+      if (cntErr) {
+        setErrorMessage(cntErr.message);
         finish();
         return;
       }
-
-      if (inserted) {
-        const nextCount = customCreationsUsed + 1;
-        const { error: cntErr } = await supabase
-          .from("users")
-          .update({ interest_custom_creations_count: nextCount })
-          .eq("id", userId);
-        if (cntErr) {
-          setErrorMessage(cntErr.message);
-          finish();
-          return;
-        }
-        setCustomCreationsUsed(nextCount);
-        addPickById(inserted.id, inserted.label);
-        mergeCatalogPick({ id: inserted.id, label: inserted.label });
-      }
-      finish();
+      setCustomCreationsUsed(nextCount);
+      addPickById(inserted.id, inserted.label);
+      mergeCatalogPick({ id: inserted.id, label: inserted.label });
     }
+    finish();
   };
 
   return (
@@ -1085,28 +1085,14 @@ export default function HomePage() {
           aria-labelledby="interest-confirm-lead"
           onClick={(e) => e.stopPropagation()}
         >
-          {interestConfirm.kind === "new" &&
-          interestConfirm.insertsRemaining != null ? (
-            <p
-              id="interest-confirm-lead"
-              className="mb-3 text-sm text-gray-700"
-            >
-              あと{interestConfirm.insertsRemaining}つ、新しい語としてデータベースに登録できます
-            </p>
-          ) : interestConfirm.kind === "existing" ? (
-            <p
-              id="interest-confirm-lead"
-              className="mb-3 text-sm text-gray-700"
-            >
-              「{interestConfirm.label}」は既に登録されています。
-            </p>
-          ) : (
-            <p id="interest-confirm-lead" className="mb-3 text-sm text-gray-700">
-              確認
-            </p>
-          )}
+          <p
+            id="interest-confirm-lead"
+            className="mb-3 text-sm text-gray-700"
+          >
+            あと{interestConfirm.insertsRemaining}つ、一覧にない新しい語を登録できます。
+          </p>
           <p className="mb-4 text-sm font-medium text-gray-900">
-            「{interestConfirm.label}」で登録しますか？
+            「{interestConfirm.label}」を一覧に追加しますか？
           </p>
           <div className="flex flex-wrap justify-end gap-2">
             <button
