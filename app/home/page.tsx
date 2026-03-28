@@ -754,10 +754,17 @@ export default function HomePage() {
                     </p>
                   ) : null}
                   {interestPicksServer.length > 0 ? (
-                    <p className="text-xs text-gray-600">
-                      趣味・関心:{" "}
-                      {interestPicksServer.map((p) => p.label).join(" · ")}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
+                      <span className="shrink-0">趣味・関心:</span>
+                      {interestPicksServer.map((p) => (
+                        <span
+                          key={p.id}
+                          className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
+                        >
+                          {p.label}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
               </div>
