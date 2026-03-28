@@ -177,15 +177,15 @@ export default function HomePage() {
       profile = fallback.data as ProfileRow | null;
     }
 
-    const presetRes = await supabase
+    // プリセットだけでなく、誰かが登録した is_preset=false も共有マスタなので検索対象に含める
+    const catalogRes = await supabase
       .from("interest_tags")
       .select("id, label")
-      .eq("is_preset", true)
       .order("label");
 
-    const presetData = presetRes.data;
-    const presetWarning = presetRes.error
-      ? `${presetRes.error.message}（interest_tags 未適用の可能性。趣味・関心の一覧が使えません。）`
+    const catalogData = catalogRes.data;
+    const catalogWarning = catalogRes.error
+      ? `${catalogRes.error.message}（interest_tags 未適用の可能性。趣味・関心の一覧が使えません。）`
       : null;
 
     const uiRes = await supabase
@@ -228,7 +228,7 @@ export default function HomePage() {
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
     setProfileBio(bio);
-    setPresetRows((presetData ?? []) as InterestPick[]);
+    setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
       setInterestDraft(picks);
@@ -237,7 +237,7 @@ export default function HomePage() {
     setNicknameDraft(nickname ?? "");
     setBioDraft(bio);
 
-    const warn = [presetWarning, uiWarning].filter(Boolean).join(" ");
+    const warn = [catalogWarning, uiWarning].filter(Boolean).join(" ");
     setErrorMessage(warn || null);
   };
 
@@ -516,6 +516,15 @@ export default function HomePage() {
     addPickById(pick.id, pick.label);
   };
 
+  const mergeCatalogPick = (pick: InterestPick) => {
+    setPresetRows((prev) => {
+      if (prev.some((p) => p.id === pick.id)) return prev;
+      return [...prev, pick].sort((a, b) =>
+        a.label.localeCompare(b.label, "ja")
+      );
+    });
+  };
+
   const removeInterestPick = (id: string) => {
     setInterestDraft((prev) => prev.filter((p) => p.id !== id));
   };
@@ -606,6 +615,10 @@ export default function HomePage() {
 
     if (interestConfirm.kind === "existing" && interestConfirm.tagId) {
       addPickById(interestConfirm.tagId, interestConfirm.label);
+      mergeCatalogPick({
+        id: interestConfirm.tagId,
+        label: interestConfirm.label,
+      });
       finish();
       return;
     }
@@ -628,6 +641,10 @@ export default function HomePage() {
         );
         if (raceId) {
           addPickById(raceId as string, interestConfirm.label);
+          mergeCatalogPick({
+            id: raceId as string,
+            label: interestConfirm.label,
+          });
           finish();
           return;
         }
@@ -649,6 +666,7 @@ export default function HomePage() {
         }
         setCustomCreationsUsed(nextCount);
         addPickById(inserted.id, inserted.label);
+        mergeCatalogPick({ id: inserted.id, label: inserted.label });
       }
       finish();
     }
@@ -1080,7 +1098,7 @@ export default function HomePage() {
               id="interest-confirm-lead"
               className="mb-3 text-sm text-gray-700"
             >
-              「{interestConfirm.label}」は既に登録されています。
+              「{interestConfirm.label}」はデータベースにあります（他ユーザーが登録した語も選べます）。
             </p>
           ) : (
             <p id="interest-confirm-lead" className="mb-3 text-sm text-gray-700">
