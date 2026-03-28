@@ -148,7 +148,6 @@ export default function Home() {
 
   const needsNickname =
     Boolean(userId) && profileReady && profileNickname === null;
-  const timelinePosts = posts.filter((post) => post.user_id !== userId);
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
@@ -504,6 +503,7 @@ export default function Home() {
 
     if (data) {
       setInput("");
+      setComposeOpen(false);
       await fetchPosts();
     }
   };
@@ -854,13 +854,13 @@ export default function Home() {
             ) : null}
 
             <section>
-              {timelinePosts.length === 0 ? (
+              {posts.length === 0 ? (
                 <p className="text-sm text-gray-500">
-                  他ユーザーの投稿はまだありません。
+                  まだ投稿がありません。
                 </p>
               ) : (
                 <ul className="space-y-3">
-                  {timelinePosts.map((post) => (
+                  {posts.map((post) => (
                 <li
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
