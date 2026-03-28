@@ -866,13 +866,28 @@ export default function Home() {
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                      <Avatar
-                        name={post.users?.nickname ?? null}
-                        avatarUrl={post.users?.avatar_url ?? null}
-                      />
-                      <span>{post.users?.nickname ?? "（未設定）"}</span>
-                    </div>
+                    {post.user_id ? (
+                      <Link
+                        href={`/home/${post.user_id}`}
+                        className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-blue-800"
+                      >
+                        <Avatar
+                          name={post.users?.nickname ?? null}
+                          avatarUrl={post.users?.avatar_url ?? null}
+                        />
+                        <span className="truncate underline decoration-blue-200 underline-offset-2">
+                          {post.users?.nickname ?? "（未設定）"}
+                        </span>
+                      </Link>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                        <Avatar
+                          name={post.users?.nickname ?? null}
+                          avatarUrl={post.users?.avatar_url ?? null}
+                        />
+                        <span>{post.users?.nickname ?? "（未設定）"}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {post.created_at
