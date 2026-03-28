@@ -763,7 +763,7 @@ export default function Home() {
                           </select>
                           {moderationMode === "mock" ? (
                             <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
-                              ※mockモードは特定NGワードのみ検出
+                              ※簡易モードは特定NGワードのみ検出
                             </span>
                           ) : (
                             <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">

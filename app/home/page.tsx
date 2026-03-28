@@ -4,6 +4,15 @@ import Link from "next/link";
 import React, { useEffect, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import {
+  filterPresetInterests,
+  MAX_CUSTOM_INTEREST_LEN,
+  MAX_INTEREST_TAGS,
+  normalizeInterestInput,
+  parseInterestsFromDb,
+  serializeInterestsToDb,
+  validateCustomInterestText,
+} from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
 
 const supabase = createClient();
@@ -85,7 +94,13 @@ export default function HomePage() {
   const [profileInterests, setProfileInterests] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
-  const [interestsDraft, setInterestsDraft] = useState("");
+  const [selectedInterestTags, setSelectedInterestTags] = useState<string[]>(
+    []
+  );
+  const [interestSearchQuery, setInterestSearchQuery] = useState("");
+  const [interestConfirm, setInterestConfirm] = useState<{
+    text: string;
+  } | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -156,7 +171,7 @@ export default function HomePage() {
     setProfileInterests(interests);
     setNicknameDraft(nickname ?? "");
     setBioDraft(bio);
-    setInterestsDraft(interests);
+    setSelectedInterestTags(parseInterestsFromDb(interests));
     setErrorMessage(null);
   };
 
@@ -205,7 +220,9 @@ export default function HomePage() {
     setProfileInterests("");
     setNicknameDraft("");
     setBioDraft("");
-    setInterestsDraft("");
+    setSelectedInterestTags([]);
+    setInterestSearchQuery("");
+    setInterestConfirm(null);
     setProfileEditOpen(false);
     setProfileReady(false);
   };
@@ -294,8 +311,8 @@ export default function HomePage() {
       setErrorMessage("画像ファイルを選択してください。");
       return;
     }
-    if (file.size > 2 * 1024 * 1024) {
-      setErrorMessage("画像サイズは2MB以下にしてください。");
+    if (file.size > 1 * 1024 * 1024) {
+      setErrorMessage("画像サイズは1MB以下にしてください。");
       return;
     }
 
@@ -351,7 +368,7 @@ export default function HomePage() {
       .update({
         nickname: result.value,
         bio: bioDraft.trim(),
-        interests: interestsDraft.trim(),
+        interests: serializeInterestsToDb(selectedInterestTags),
       })
       .eq("id", userId);
 
@@ -368,13 +385,75 @@ export default function HomePage() {
 
     setProfileNickname(result.value);
     setProfileBio(bioDraft.trim());
-    setProfileInterests(interestsDraft.trim());
+    setProfileInterests(serializeInterestsToDb(selectedInterestTags));
     await fetchOwnPosts(userId);
     setProfileSaving(false);
     setProfileEditOpen(false);
   };
 
+  const toggleProfileEdit = () => {
+    setProfileEditOpen((prev) => {
+      if (!prev) {
+        setSelectedInterestTags(parseInterestsFromDb(profileInterests));
+        setInterestSearchQuery("");
+        setInterestConfirm(null);
+      }
+      return !prev;
+    });
+  };
+
+  const addInterestTag = (tag: string) => {
+    const t = normalizeInterestInput(tag);
+    if (!t || selectedInterestTags.includes(t)) return;
+    if (selectedInterestTags.length >= MAX_INTEREST_TAGS) return;
+    setSelectedInterestTags((prev) => [...prev, t]);
+    setInterestSearchQuery("");
+    setInterestConfirm(null);
+  };
+
+  const removeInterestTag = (tag: string) => {
+    setSelectedInterestTags((prev) => prev.filter((x) => x !== tag));
+  };
+
+  const handleInterestPlusClick = () => {
+    setErrorMessage(null);
+    if (selectedInterestTags.length >= MAX_INTEREST_TAGS) {
+      setErrorMessage(`趣味・関心は合計${MAX_INTEREST_TAGS}つまでです。`);
+      return;
+    }
+    const q = normalizeInterestInput(interestSearchQuery);
+    const hits = q
+      ? filterPresetInterests(interestSearchQuery).filter(
+          (t) => !selectedInterestTags.includes(t)
+        )
+      : [];
+    if (hits.length > 0) return;
+    const err = validateCustomInterestText(interestSearchQuery);
+    if (err) {
+      setErrorMessage(err);
+      return;
+    }
+    const value = normalizeInterestInput(interestSearchQuery);
+    if (selectedInterestTags.includes(value)) {
+      setErrorMessage("すでに追加されています。");
+      return;
+    }
+    setInterestConfirm({ text: value });
+  };
+
+  const confirmCustomInterest = () => {
+    if (!interestConfirm) return;
+    addInterestTag(interestConfirm.text);
+  };
+
+  const presetSearchHits = normalizeInterestInput(interestSearchQuery)
+    ? filterPresetInterests(interestSearchQuery).filter(
+        (t) => !selectedInterestTags.includes(t)
+      )
+    : [];
+
   return (
+    <>
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <div className="mx-auto max-w-xl p-6">
         <div className="mb-4 flex items-start justify-between gap-3">
@@ -428,14 +507,16 @@ export default function HomePage() {
                   ) : null}
                   {profileInterests ? (
                     <p className="text-xs text-gray-600">
-                      趣味・関心: {profileInterests}
+                      趣味・関心:{" "}
+                      {parseInterestsFromDb(profileInterests).join(" · ") ||
+                        profileInterests}
                     </p>
                   ) : null}
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setProfileEditOpen((prev) => !prev)}
+                onClick={() => toggleProfileEdit()}
                 className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
               >
                 プロフィール編集
@@ -457,12 +538,15 @@ export default function HomePage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+                  <label
+                    className="cursor-pointer"
+                    title={avatarUploading ? "アップロード中..." : "画像を変更"}
+                  >
                     <Avatar
                       name={profileNickname}
                       avatarUrl={profileAvatarUrl}
+                      size="lg"
                     />
-                    <span>{avatarUploading ? "アップロード中..." : "画像を変更"}</span>
                     <input
                       type="file"
                       accept="image/png,image/jpeg,image/webp,image/gif"
@@ -472,7 +556,7 @@ export default function HomePage() {
                     />
                   </label>
                   <span className="text-xs text-gray-500">
-                    2MB以下 / PNG JPG WEBP GIF
+                    1MB以下 / PNG JPG WEBP GIF
                   </span>
                 </div>
                 <div className="space-y-2">
@@ -500,14 +584,77 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
-                    趣味・関心
+                    趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
                   </label>
-                  <input
-                    value={interestsDraft}
-                    onChange={(e) => setInterestsDraft(e.target.value)}
-                    maxLength={120}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
+                  <p className="text-xs text-gray-500">
+                    検索結果リストにない言葉は「＋」から追加できます。
+                  </p>
+                  <div className="flex min-h-[1.75rem] flex-wrap gap-1.5">
+                    {selectedInterestTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          className="rounded px-0.5 text-blue-700 hover:bg-blue-200/80"
+                          aria-label={`${tag}を削除`}
+                          onClick={() => removeInterestTag(tag)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={interestSearchQuery}
+                      onChange={(e) => {
+                        setInterestSearchQuery(
+                          e.target.value.replace(/[\n\r]/g, "")
+                        );
+                        setInterestConfirm(null);
+                      }}
+                      maxLength={MAX_CUSTOM_INTEREST_LEN}
+                      disabled={selectedInterestTags.length >= MAX_INTEREST_TAGS}
+                      placeholder="キーワードで検索"
+                      className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-lg font-medium leading-none text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      disabled={
+                        selectedInterestTags.length >= MAX_INTEREST_TAGS ||
+                        !normalizeInterestInput(interestSearchQuery) ||
+                        presetSearchHits.length > 0
+                      }
+                      title="検索で0件のときだけ、入力中の言葉を追加できます"
+                      onClick={() => handleInterestPlusClick()}
+                    >
+                      ＋
+                    </button>
+                  </div>
+                  {normalizeInterestInput(interestSearchQuery) &&
+                  presetSearchHits.length > 0 ? (
+                    <ul className="max-h-36 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 text-sm">
+                      {presetSearchHits.map((tag) => (
+                        <li key={tag}>
+                          <button
+                            type="button"
+                            className="w-full px-3 py-2 text-left hover:bg-white"
+                            onClick={() => addInterestTag(tag)}
+                            disabled={
+                              selectedInterestTags.length >= MAX_INTEREST_TAGS
+                            }
+                          >
+                            {tag}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -522,7 +669,9 @@ export default function HomePage() {
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
-                      setInterestsDraft(profileInterests);
+                      setSelectedInterestTags(parseInterestsFromDb(profileInterests));
+                      setInterestSearchQuery("");
+                      setInterestConfirm(null);
                       setProfileEditOpen(false);
                     }}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -704,6 +853,49 @@ export default function HomePage() {
         ) : null}
       </div>
     </main>
+    {interestConfirm ? (
+      <div
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4"
+        role="presentation"
+        onClick={() => setInterestConfirm(null)}
+      >
+        <div
+          className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-4 shadow-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="interest-confirm-slots"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p
+            id="interest-confirm-slots"
+            className="mb-3 text-sm text-gray-700"
+          >
+            あと{MAX_INTEREST_TAGS - selectedInterestTags.length}
+            個まで新規登録が可能です
+          </p>
+          <p className="mb-4 text-sm font-medium text-gray-900">
+            「{interestConfirm.text}」で登録しますか？
+          </p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              onClick={() => setInterestConfirm(null)}
+            >
+              いいえ
+            </button>
+            <button
+              type="button"
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              onClick={() => confirmCustomInterest()}
+            >
+              はい
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
 
