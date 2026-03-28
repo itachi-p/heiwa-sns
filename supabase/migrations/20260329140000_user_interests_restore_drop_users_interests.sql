@@ -3,19 +3,11 @@
 
 alter table public.users drop column if exists interests;
 
-drop trigger if exists user_interests_max_three_bi on public.user_interests;
+-- 20260329120000 で user_interests は既に削除済み。PostgreSQL では
+-- DROP TRIGGER ... ON public.user_interests はテーブルが無いとエラーになる（IF EXISTS はトリガー名のみ）。
+drop table if exists public.user_interests cascade;
 
 drop function if exists public.enforce_user_interests_max_three ();
-
-drop policy if exists "user_interests_select_authenticated" on public.user_interests;
-
-drop policy if exists "user_interests_insert_own" on public.user_interests;
-
-drop policy if exists "user_interests_update_own" on public.user_interests;
-
-drop policy if exists "user_interests_delete_own" on public.user_interests;
-
-drop table if exists public.user_interests;
 
 create table public.user_interests (
   user_id uuid not null references public.users (id) on delete cascade,
