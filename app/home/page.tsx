@@ -575,6 +575,8 @@ export default function HomePage() {
         interestSearchQuery,
         draftTagIdSet
       );
+      // いま取り直した一覧で候補が付いた＝DB にはもうその語がある。
+      // モーダルも新規登録(INSERT)もせず、下に出るリストから選ぶだけで終了。
       if (hitsFresh.length > 0) {
         return;
       }
@@ -594,7 +596,20 @@ export default function HomePage() {
           setErrorMessage("すでに追加されています。");
           return;
         }
-        setErrorMessage("再読み込みしてください。");
+        // 一覧ではまだ0件だが DB には行がある（例: 押す直前に他ユーザーが同じ語を登録）
+        // → 新規登録の確認は出さず、趣味・関心の下書きにそのタグを足す
+        let labelResolved = catalog.find((p) => p.id === eid)?.label;
+        if (!labelResolved) {
+          const { data: one } = await supabase
+            .from("interest_tags")
+            .select("label")
+            .eq("id", eid)
+            .maybeSingle();
+          labelResolved = one?.label;
+        }
+        const labelPick = labelResolved ?? value;
+        addPickById(eid, labelPick);
+        mergeCatalogPick({ id: eid, label: labelPick });
         return;
       }
 
