@@ -100,10 +100,11 @@ export default function HomePage() {
   const [interestDraft, setInterestDraft] = useState<InterestPick[]>([]);
   const [customCreationsUsed, setCustomCreationsUsed] = useState(0);
   const [interestSearchQuery, setInterestSearchQuery] = useState("");
-  const [interestConfirm, setInterestConfirm] = useState<{
-    label: string;
-    insertsRemaining: number;
-  } | null>(null);
+  const [interestConfirm, setInterestConfirm] = useState<
+    | { kind: "new"; label: string; insertsRemaining: number }
+    | { kind: "existing"; label: string; tagId: string }
+    | null
+  >(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -573,7 +574,25 @@ export default function HomePage() {
         setErrorMessage("すでに追加されています。");
         return;
       }
-      let labelForPick = presetRows.find((p) => p.id === eid)?.label;
+      const { data: freshRows, error: freshErr } = await supabase
+        .from("interest_tags")
+        .select("id, label")
+        .order("label");
+      if (!freshErr && freshRows && freshRows.length > 0) {
+        const catalog = freshRows as InterestPick[];
+        const refreshedHits = filterPresetRows(
+          catalog,
+          interestSearchQuery,
+          draftTagIdSet
+        );
+        setPresetRows(catalog);
+        if (refreshedHits.length > 0) {
+          return;
+        }
+      }
+      let labelForPick =
+        freshRows?.find((r) => r.id === eid)?.label ??
+        presetRows.find((p) => p.id === eid)?.label;
       if (!labelForPick) {
         const { data: row } = await supabase
           .from("interest_tags")
@@ -583,8 +602,11 @@ export default function HomePage() {
         labelForPick = row?.label;
       }
       const labelResolved = labelForPick ?? value;
-      addPickById(eid, labelResolved);
-      mergeCatalogPick({ id: eid, label: labelResolved });
+      setInterestConfirm({
+        kind: "existing",
+        label: labelResolved,
+        tagId: eid,
+      });
       return;
     }
 
@@ -597,6 +619,7 @@ export default function HomePage() {
       return;
     }
     setInterestConfirm({
+      kind: "new",
       label: value,
       insertsRemaining,
     });
@@ -606,16 +629,26 @@ export default function HomePage() {
     if (!interestConfirm || !userId) return;
     setErrorMessage(null);
 
+    const finish = () => {
+      setInterestConfirm(null);
+    };
+
+    if (interestConfirm.kind === "existing") {
+      addPickById(interestConfirm.tagId, interestConfirm.label);
+      mergeCatalogPick({
+        id: interestConfirm.tagId,
+        label: interestConfirm.label,
+      });
+      finish();
+      return;
+    }
+
     const quality = validateInterestLabelForRegistration(interestConfirm.label);
     if (quality) {
       setErrorMessage(quality);
       setInterestConfirm(null);
       return;
     }
-
-    const finish = () => {
-      setInterestConfirm(null);
-    };
 
     const { data: inserted, error: insErr } = await supabase
       .from("interest_tags")
@@ -1085,15 +1118,26 @@ export default function HomePage() {
           aria-labelledby="interest-confirm-lead"
           onClick={(e) => e.stopPropagation()}
         >
-          <p
-            id="interest-confirm-lead"
-            className="mb-3 text-sm text-gray-700"
-          >
-            あと{interestConfirm.insertsRemaining}つ、一覧にない新しい語を登録できます。
-          </p>
-          <p className="mb-4 text-sm font-medium text-gray-900">
-            「{interestConfirm.label}」を一覧に追加しますか？
-          </p>
+          {interestConfirm.kind === "new" ? (
+            <>
+              <p
+                id="interest-confirm-lead"
+                className="mb-3 text-sm text-gray-700"
+              >
+                あと{interestConfirm.insertsRemaining}つ、一覧にない新しい語を登録できます。
+              </p>
+              <p className="mb-4 text-sm font-medium text-gray-900">
+                「{interestConfirm.label}」を登録しますか？
+              </p>
+            </>
+          ) : (
+            <p
+              id="interest-confirm-lead"
+              className="mb-4 text-sm font-medium text-gray-900"
+            >
+              「{interestConfirm.label}」を趣味・関心に追加しますか？
+            </p>
+          )}
           <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
