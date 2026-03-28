@@ -100,11 +100,10 @@ export default function HomePage() {
   const [interestDraft, setInterestDraft] = useState<InterestPick[]>([]);
   const [customCreationsUsed, setCustomCreationsUsed] = useState(0);
   const [interestSearchQuery, setInterestSearchQuery] = useState("");
-  const [interestConfirm, setInterestConfirm] = useState<
-    | { kind: "new"; label: string; insertsRemaining: number }
-    | { kind: "existing"; label: string; tagId: string }
-    | null
-  >(null);
+  const [interestConfirm, setInterestConfirm] = useState<{
+    label: string;
+    insertsRemaining: number;
+  } | null>(null);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -604,12 +603,11 @@ export default function HomePage() {
             .maybeSingle();
           labelForPick = row?.label;
         }
-        const labelResolved = labelForPick ?? value;
-        setInterestConfirm({
-          kind: "existing",
-          label: labelResolved,
-          tagId: eid,
+        mergeCatalogPick({
+          id: eid,
+          label: labelForPick ?? value,
         });
+        setErrorMessage("一覧に表示できませんでした。再読み込みしてください。");
         return;
       }
 
@@ -622,7 +620,6 @@ export default function HomePage() {
         return;
       }
       setInterestConfirm({
-        kind: "new",
         label: value,
         insertsRemaining,
       });
@@ -638,16 +635,6 @@ export default function HomePage() {
     const finish = () => {
       setInterestConfirm(null);
     };
-
-    if (interestConfirm.kind === "existing") {
-      addPickById(interestConfirm.tagId, interestConfirm.label);
-      mergeCatalogPick({
-        id: interestConfirm.tagId,
-        label: interestConfirm.label,
-      });
-      finish();
-      return;
-    }
 
     const quality = validateInterestLabelForRegistration(interestConfirm.label);
     if (quality) {
@@ -845,7 +832,7 @@ export default function HomePage() {
                     趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
                   </label>
                   <p className="text-xs text-gray-500">
-                    検索結果リストにない言葉は「＋」から追加できます。プロフィールへの反映は「保存」後です。
+                    検索結果リストにない言葉は「＋」から追加できます。
                   </p>
                   <div className="flex min-h-[1.75rem] flex-wrap gap-1.5">
                     {interestDraft.map((pick) => (
@@ -896,7 +883,7 @@ export default function HomePage() {
                       title="検索で0件のときだけ、入力中の言葉を追加できます"
                       onClick={() => void handleInterestPlusClick()}
                     >
-                      {interestPlusPending ? "…" : "＋"}
+                      ＋
                     </button>
                   </div>
                   {normalizeInterestInput(interestSearchQuery) &&
@@ -1130,26 +1117,15 @@ export default function HomePage() {
           aria-labelledby="interest-confirm-lead"
           onClick={(e) => e.stopPropagation()}
         >
-          {interestConfirm.kind === "new" ? (
-            <>
-              <p
-                id="interest-confirm-lead"
-                className="mb-3 text-sm text-gray-700"
-              >
-                あと{interestConfirm.insertsRemaining}つ、一覧にない新しい語を登録できます。
-              </p>
-              <p className="mb-4 text-sm font-medium text-gray-900">
-                「{interestConfirm.label}」を登録しますか？
-              </p>
-            </>
-          ) : (
-            <p
-              id="interest-confirm-lead"
-              className="mb-4 text-sm font-medium text-gray-900"
-            >
-              「{interestConfirm.label}」を趣味・関心に追加しますか？
-            </p>
-          )}
+          <p
+            id="interest-confirm-lead"
+            className="mb-3 text-sm text-gray-700"
+          >
+            あと{interestConfirm.insertsRemaining}つ、一覧にない新しい語を登録できます。
+          </p>
+          <p className="mb-4 text-sm font-medium text-gray-900">
+            「{interestConfirm.label}」を登録しますか？
+          </p>
           <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
