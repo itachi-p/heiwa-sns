@@ -19,6 +19,7 @@ import {
   validateInterestLabelForRegistration,
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
+import { canEditOwnPost } from "@/lib/post-edit-window";
 import {
   buildReplyPerspectiveBlockMessage,
   normalizePerspectiveScores,
@@ -113,6 +114,9 @@ export default function HomePage() {
   const [nicknameModalError, setNicknameModalError] = useState<string | null>(
     null
   );
+  const [editingPostId, setEditingPostId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [postEditSaving, setPostEditSaving] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -396,6 +400,7 @@ export default function HomePage() {
       setReplyComposerPostId(null);
       setReplyModerationByPostId({});
       setReplyBlockMessageByPostId({});
+      setEditingPostId(null);
       return;
     }
 
@@ -434,6 +439,7 @@ export default function HomePage() {
     setReplyComposerPostId(null);
     setReplyModerationByPostId({});
     setReplyBlockMessageByPostId({});
+    setEditingPostId(null);
   };
 
   const handleDeletePost = async (postId: number) => {
@@ -453,6 +459,30 @@ export default function HomePage() {
     }
 
     setErrorMessage(null);
+    if (editingPostId === postId) setEditingPostId(null);
+    await fetchOwnPosts(userId);
+  };
+
+  const handleSavePostEdit = async (postId: number) => {
+    if (!userId) return;
+    const content = editDraft.trim();
+    if (!content) {
+      setErrorMessage("本文を入力してください。");
+      return;
+    }
+    setPostEditSaving(true);
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("posts")
+      .update({ content })
+      .eq("id", postId)
+      .eq("user_id", userId);
+    setPostEditSaving(false);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    setEditingPostId(null);
     await fetchOwnPosts(userId);
   };
 
@@ -1430,22 +1460,71 @@ export default function HomePage() {
                         />
                         <span>{post.users?.nickname ?? "（未設定）"}</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeletePost(post.id)}
-                        className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
-                      >
-                        削除
-                      </button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1">
+                        {canInteract &&
+                        userId &&
+                        post.user_id &&
+                        canEditOwnPost(post.created_at, userId, post.user_id) ? (
+                          editingPostId === post.id ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditingPostId(null)}
+                              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 hover:bg-gray-50"
+                            >
+                              編集をやめる
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPostId(post.id);
+                                setEditDraft(post.content);
+                              }}
+                              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 hover:bg-gray-50"
+                            >
+                              編集
+                            </button>
+                          )
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void handleDeletePost(post.id)}
+                          className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                        >
+                          削除
+                        </button>
+                      </div>
                     </div>
                     <div className="mt-1 text-sm text-gray-500">
                       {post.created_at
                         ? new Date(post.created_at).toLocaleString()
                         : ""}
                     </div>
-                    <div className="mt-1 whitespace-pre-wrap break-words">
-                      {renderTextWithLinks(post.content)}
-                    </div>
+                    {editingPostId === post.id ? (
+                      <div className="mt-1 space-y-2">
+                        <textarea
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          rows={5}
+                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                          disabled={postEditSaving}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={postEditSaving}
+                            onClick={() => void handleSavePostEdit(post.id)}
+                            className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {postEditSaving ? "保存中…" : "保存"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1 whitespace-pre-wrap break-words">
+                        {renderTextWithLinks(post.content)}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         type="button"
