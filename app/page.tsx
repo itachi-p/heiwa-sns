@@ -13,6 +13,12 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
+import {
+  buildReplyPerspectiveBlockMessage,
+  normalizePerspectiveScores,
+  PERSPECTIVE_ATTRIBUTE_LABEL_JA,
+  REPLY_PERSPECTIVE_BLOCK_THRESHOLD,
+} from "@/lib/perspective-labels";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
 
@@ -111,6 +117,21 @@ export default function Home() {
   const [replyComposerPostId, setReplyComposerPostId] = useState<number | null>(
     null
   );
+  /** 返信ごとの直近 AI 判定（テスト表示用） */
+  const [replyModerationByPostId, setReplyModerationByPostId] = useState<
+    Record<
+      number,
+      | {
+          mode: string;
+          overallMax: number;
+          scores: Record<string, number>;
+        }
+      | null
+    >
+  >({});
+  const [replyBlockMessageByPostId, setReplyBlockMessageByPostId] = useState<
+    Record<number, string | null>
+  >({});
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -476,6 +497,7 @@ export default function Home() {
 
     setReplySubmittingPostId(postId);
     setErrorMessage(null);
+    setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
 
     try {
       const res = await fetch("/api/moderate", {
@@ -489,11 +511,19 @@ export default function Home() {
       const json = (await res.json()) as {
         error?: string;
         overallMax?: number;
+        mode?: string;
         degraded?: boolean;
         degradedReason?: string;
+        paragraphs?: Array<{
+          index: number;
+          text: string;
+          maxScore: number;
+          scores: Record<string, number>;
+        }>;
       };
       if (!res.ok) {
         setErrorMessage(json?.error ?? "AI判定に失敗しました。");
+        setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
         return;
       }
       if (json.degraded) {
@@ -504,18 +534,35 @@ export default function Home() {
       } else {
         setModerationDegradedMessage(null);
       }
-      if (
-        blockOnSubmit &&
-        typeof json?.overallMax === "number" &&
-        json.overallMax >= blockThreshold
-      ) {
-        setErrorMessage(
-          `AI判定スコアが高いため返信を保留しました（max=${json.overallMax.toFixed(
-            3
-          )}）。`
-        );
+
+      const scores = normalizePerspectiveScores(
+        json.paragraphs?.[0]?.scores as Record<string, unknown> | undefined
+      );
+      const overallMax =
+        typeof json.overallMax === "number" ? json.overallMax : 0;
+
+      setReplyModerationByPostId((prev) => ({
+        ...prev,
+        [postId]: {
+          mode: json.mode ?? moderationMode,
+          overallMax,
+          scores,
+        },
+      }));
+
+      if (overallMax > REPLY_PERSPECTIVE_BLOCK_THRESHOLD) {
+        setReplyBlockMessageByPostId((prev) => ({
+          ...prev,
+          [postId]: buildReplyPerspectiveBlockMessage(
+            overallMax,
+            scores,
+            REPLY_PERSPECTIVE_BLOCK_THRESHOLD
+          ),
+        }));
         return;
       }
+
+      setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
 
       const { error } = await supabase.from("post_replies").insert({
         post_id: postId,
@@ -529,14 +576,30 @@ export default function Home() {
       }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
-      setReplyComposerPostId(null);
+      /** 判定パネルは残す（閉じる・キャンセル・次の送信開始で消える） */
       await fetchPosts();
     } catch (err) {
       console.error("reply moderation error:", err);
       setErrorMessage("AI判定に失敗しました。");
+      setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
     } finally {
       setReplySubmittingPostId(null);
     }
+  };
+
+  const handleDeleteReply = async (replyId: number) => {
+    if (!userId) return;
+    if (!window.confirm("この返信を削除しますか？")) return;
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("post_replies")
+      .delete()
+      .eq("id", replyId);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    await fetchPosts();
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -943,9 +1006,27 @@ export default function Home() {
                       type="button"
                       onClick={() => {
                         if (!tryInteraction()) return;
-                        setReplyComposerPostId((id) =>
-                          id === post.id ? null : post.id
-                        );
+                        if (replyComposerPostId === post.id) {
+                          setReplyComposerPostId(null);
+                          setReplyModerationByPostId((p) => ({
+                            ...p,
+                            [post.id]: null,
+                          }));
+                          setReplyBlockMessageByPostId((p) => ({
+                            ...p,
+                            [post.id]: null,
+                          }));
+                        } else {
+                          setReplyComposerPostId(post.id);
+                          setReplyModerationByPostId((p) => ({
+                            ...p,
+                            [post.id]: null,
+                          }));
+                          setReplyBlockMessageByPostId((p) => ({
+                            ...p,
+                            [post.id]: null,
+                          }));
+                        }
                       }}
                       className={[
                         "rounded-md border px-3 py-1 text-sm font-medium transition-colors",
@@ -964,29 +1045,40 @@ export default function Home() {
                     <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3 text-sm">
                       {(repliesByPost[post.id] ?? []).map((r) => (
                         <li key={r.id} className="rounded-md bg-gray-50/80 px-2 py-2">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                            {r.user_id ? (
-                              <Link
-                                href={`/home/${r.user_id}`}
-                                className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
+                          <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-gray-600">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              {r.user_id ? (
+                                <Link
+                                  href={`/home/${r.user_id}`}
+                                  className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
+                                >
+                                  <UserAvatar
+                                    name={r.users?.nickname ?? null}
+                                    avatarUrl={r.users?.avatar_url ?? null}
+                                    placeholderHex={
+                                      r.users?.avatar_placeholder_hex ?? null
+                                    }
+                                  />
+                                  <span className="truncate">
+                                    {r.users?.nickname ?? "（未設定）"}
+                                  </span>
+                                </Link>
+                              ) : null}
+                              <span className="text-gray-400">
+                                {r.created_at
+                                  ? new Date(r.created_at).toLocaleString()
+                                  : ""}
+                              </span>
+                            </div>
+                            {canInteract && userId === r.user_id ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteReply(r.id)}
+                                className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700 hover:bg-red-100"
                               >
-                                <UserAvatar
-                                  name={r.users?.nickname ?? null}
-                                  avatarUrl={r.users?.avatar_url ?? null}
-                                  placeholderHex={
-                                    r.users?.avatar_placeholder_hex ?? null
-                                  }
-                                />
-                                <span className="truncate">
-                                  {r.users?.nickname ?? "（未設定）"}
-                                </span>
-                              </Link>
+                                削除
+                              </button>
                             ) : null}
-                            <span className="text-gray-400">
-                              {r.created_at
-                                ? new Date(r.created_at).toLocaleString()
-                                : ""}
-                            </span>
                           </div>
                           <div className="mt-1 whitespace-pre-wrap break-words text-gray-800">
                             {renderTextWithLinks(r.content)}
@@ -999,18 +1091,56 @@ export default function Home() {
                     <div className="mt-3 border-t border-gray-100 pt-3">
                       <textarea
                         value={replyDrafts[post.id] ?? ""}
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          const v = e.target.value;
                           setReplyDrafts((prev) => ({
                             ...prev,
-                            [post.id]: e.target.value.replace(/[\n\r]/g, ""),
-                          }))
-                        }
+                            [post.id]: v,
+                          }));
+                          setReplyBlockMessageByPostId((p) => ({
+                            ...p,
+                            [post.id]: null,
+                          }));
+                        }}
                         rows={3}
                         maxLength={2000}
                         placeholder="返信を入力…"
                         autoFocus
                         className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                       />
+                      {replyModerationByPostId[post.id] ? (
+                        <div className="mb-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs">
+                          <div className="font-medium text-gray-800">
+                            返信・AI判定（mode:{" "}
+                            {replyModerationByPostId[post.id]!.mode} / max:{" "}
+                            {replyModerationByPostId[post.id]!.overallMax.toFixed(
+                              3
+                            )}{" "}
+                            / ブロック閾値:{" "}
+                            {REPLY_PERSPECTIVE_BLOCK_THRESHOLD}）
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1.5 text-gray-700">
+                            {Object.entries(
+                              replyModerationByPostId[post.id]!.scores
+                            )
+                              .sort(([a], [b]) => a.localeCompare(b))
+                              .map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
+                                >
+                                  {PERSPECTIVE_ATTRIBUTE_LABEL_JA[k] ?? k}:{" "}
+                                  {Number(v).toFixed(3)}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {replyBlockMessageByPostId[post.id]?.trim() ? (
+                        <p className="mb-2 text-sm font-medium leading-snug text-red-600">
+                          {replyBlockMessageByPostId[post.id]}
+                        </p>
+                      ) : null}
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -1025,7 +1155,17 @@ export default function Home() {
                         <button
                           type="button"
                           disabled={replySubmittingPostId === post.id}
-                          onClick={() => setReplyComposerPostId(null)}
+                          onClick={() => {
+                            setReplyComposerPostId(null);
+                            setReplyModerationByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                            setReplyBlockMessageByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                          }}
                           className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                         >
                           キャンセル
