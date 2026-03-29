@@ -112,7 +112,7 @@ export default function HomePage() {
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
-    "mock"
+    "perspective"
   );
   const [blockOnSubmit, setBlockOnSubmit] = useState(true);
   const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);

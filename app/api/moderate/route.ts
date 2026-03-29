@@ -121,19 +121,47 @@ export async function POST(req: Request) {
     const paragraphs = [normalizeText(text)];
     const results: ParagraphResult[] = [];
 
+    let degraded = false;
+    let degradedReason: string | undefined;
+
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i]!;
-      const scores =
-        mode === "mock"
-          ? mockScores(p)
-          : mode === "perspective"
-            ? await analyzeWithPerspective(p)
-            : (await analyzeWithPerspective(p)) ?? mockScores(p);
+      let scores: Partial<Record<AttributeName, number>> | null = null;
 
-      if (!scores) {
-        // should be unreachable, but keep shape stable
-        results.push({ index: i, text: p, scores: {}, maxScore: 0 });
-        continue;
+      if (mode === "mock") {
+        scores = mockScores(p);
+      } else if (mode === "perspective") {
+        try {
+          scores = await analyzeWithPerspective(p);
+        } catch {
+          scores = mockScores(p);
+          degraded = true;
+          degradedReason =
+            "APIの利用制限などにより、簡易チェックに切り替えました。";
+        }
+        if (!scores) {
+          scores = mockScores(p);
+          degraded = true;
+          degradedReason =
+            degradedReason ??
+            "APIの利用制限などにより、簡易チェックに切り替えました。";
+        }
+      } else {
+        try {
+          scores = await analyzeWithPerspective(p);
+        } catch {
+          scores = mockScores(p);
+          degraded = true;
+          degradedReason =
+            "APIの利用制限などにより、簡易チェックに切り替えました。";
+        }
+        if (!scores) {
+          scores = mockScores(p);
+          degraded = true;
+          degradedReason =
+            degradedReason ??
+            "APIの利用制限などにより、簡易チェックに切り替えました。";
+        }
       }
 
       const maxScore = Math.max(0, ...Object.values(scores).map((v) => v ?? 0));
@@ -142,16 +170,26 @@ export async function POST(req: Request) {
 
     const overallMax = Math.max(0, ...results.map((r) => r.maxScore));
 
-    return NextResponse.json({
-      mode:
-        mode === "auto"
-          ? process.env.PERSPECTIVE_API_KEY
+    const resolvedMode =
+      mode === "auto"
+        ? degraded
+          ? "mock"
+          : process.env.PERSPECTIVE_API_KEY
             ? "perspective"
             : "mock"
-          : mode,
+        : mode === "mock"
+          ? "mock"
+          : degraded
+            ? "mock"
+            : "perspective";
+
+    return NextResponse.json({
+      mode: resolvedMode,
       paragraphs: results,
       overallMax,
       truncated: false,
+      degraded,
+      degradedReason: degraded ? degradedReason : undefined,
       attributes: [
         "TOXICITY",
         "SEVERE_TOXICITY",
