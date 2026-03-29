@@ -21,6 +21,14 @@ import {
 } from "@/lib/perspective-labels";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
+import {
+  loadModerationSnapshotFromStorage,
+  parseModerateResponse,
+  persistModerationSnapshot,
+  PostModerationFixedPortal,
+  PostModerationInline,
+  type PostModerationSnapshot,
+} from "@/components/post-moderation-test-panel";
 
 const supabase = createClient();
 
@@ -89,17 +97,9 @@ export default function Home() {
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
   );
-  const [moderation, setModeration] = useState<{
-    mode: "auto" | "mock" | "perspective";
-    overallMax: number;
-    truncated: boolean;
-    paragraphs: Array<{
-      index: number;
-      text: string;
-      maxScore: number;
-      scores: Record<string, number>;
-    }>;
-  } | null>(null);
+  const [moderation, setModeration] = useState<PostModerationSnapshot | null>(
+    null
+  );
   const [moderationMode, setModerationMode] = useState<
     "mock" | "perspective"
   >("perspective");
@@ -151,6 +151,11 @@ export default function Home() {
   useEffect(() => {
     if (!needsNickname) setNicknameModalError(null);
   }, [needsNickname]);
+
+  useEffect(() => {
+    const s = loadModerationSnapshotFromStorage();
+    if (s) setModeration(s);
+  }, []);
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
@@ -602,6 +607,22 @@ export default function Home() {
     await fetchPosts();
   };
 
+  const handleDeletePost = async (postId: number) => {
+    if (!userId) return;
+    if (!window.confirm("この投稿を削除しますか？")) return;
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("posts")
+      .delete()
+      .eq("id", postId)
+      .eq("user_id", userId);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    await fetchPosts();
+  };
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) {
@@ -648,12 +669,11 @@ export default function Home() {
       } else {
         setModerationDegradedMessage(null);
       }
-      setModeration({
-        mode: json.mode ?? "perspective",
-        overallMax: typeof json.overallMax === "number" ? json.overallMax : 0,
-        truncated: Boolean(json.truncated),
-        paragraphs: json.paragraphs ?? [],
-      });
+      const snap = parseModerateResponse(json);
+      if (snap) {
+        setModeration(snap);
+        persistModerationSnapshot(snap);
+      }
       if (blockOnSubmit && typeof json?.overallMax === "number") {
         if (json.overallMax >= blockThreshold) {
           setErrorMessage(
@@ -801,7 +821,7 @@ export default function Home() {
         {authReady && !(userId && !profileReady) ? (
           <>
             {canInteract && composeOpen ? (
-              <div className="fixed inset-x-4 bottom-20 z-50 md:inset-x-auto md:right-6 md:w-[34rem]">
+              <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form
                   onSubmit={handleSubmit}
                   className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
@@ -865,30 +885,9 @@ export default function Home() {
                           />
                         </label>
                       </div>
-                      {moderation ? (
-                        <div className="rounded-md border border-gray-200 bg-white p-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-sm font-medium text-gray-800">
-                              判定結果（mode: {moderation.mode} / max:{" "}
-                              {moderation.overallMax.toFixed(3)}）
-                            </div>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-700">
-                            {Object.entries(moderation.paragraphs?.[0]?.scores ?? {})
-                              .sort(([a], [b]) => a.localeCompare(b))
-                              .map(([k, v]) => (
-                                <span
-                                  key={k}
-                                  className="rounded bg-gray-100 px-2 py-1"
-                                >
-                                  {k}: {Number(v).toFixed(3)}
-                                </span>
-                              ))}
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   </details>
+                  <PostModerationInline snapshot={moderation} />
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -930,35 +929,49 @@ export default function Home() {
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
                 >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    {post.user_id ? (
-                      <Link
-                        href={`/home/${post.user_id}`}
-                        className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-blue-800"
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      {post.user_id ? (
+                        <Link
+                          href={`/home/${post.user_id}`}
+                          className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-blue-800"
+                        >
+                          <UserAvatar
+                            name={post.users?.nickname ?? null}
+                            avatarUrl={post.users?.avatar_url ?? null}
+                            placeholderHex={
+                              post.users?.avatar_placeholder_hex ?? null
+                            }
+                          />
+                          <span className="truncate underline decoration-blue-200 underline-offset-2">
+                            {post.users?.nickname ?? "（未設定）"}
+                          </span>
+                        </Link>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                          <UserAvatar
+                            name={post.users?.nickname ?? null}
+                            avatarUrl={post.users?.avatar_url ?? null}
+                            placeholderHex={
+                              post.users?.avatar_placeholder_hex ?? null
+                            }
+                          />
+                          <span>{post.users?.nickname ?? "（未設定）"}</span>
+                        </div>
+                      )}
+                    </div>
+                    {canInteract &&
+                    userId &&
+                    post.user_id &&
+                    post.user_id === userId ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeletePost(post.id)}
+                        className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
                       >
-                        <UserAvatar
-                          name={post.users?.nickname ?? null}
-                          avatarUrl={post.users?.avatar_url ?? null}
-                          placeholderHex={
-                            post.users?.avatar_placeholder_hex ?? null
-                          }
-                        />
-                        <span className="truncate underline decoration-blue-200 underline-offset-2">
-                          {post.users?.nickname ?? "（未設定）"}
-                        </span>
-                      </Link>
-                    ) : (
-                      <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                        <UserAvatar
-                          name={post.users?.nickname ?? null}
-                          avatarUrl={post.users?.avatar_url ?? null}
-                          placeholderHex={
-                            post.users?.avatar_placeholder_hex ?? null
-                          }
-                        />
-                        <span>{post.users?.nickname ?? "（未設定）"}</span>
-                      </div>
-                    )}
+                        削除
+                      </button>
+                    ) : null}
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
                     {post.created_at
@@ -969,39 +982,45 @@ export default function Home() {
                     {renderTextWithLinks(post.content)}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {(() => {
-                      const liked =
-                        canInteract && likedPostIds.has(post.id);
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!tryInteraction()) return;
-                            void handleLike(post.id);
-                          }}
-                          className={[
-                            "inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium transition-colors",
-                            liked
-                              ? "border-pink-300 bg-pink-50 text-pink-700"
-                              : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
-                          ].join(" ")}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            className={
-                              liked ? "text-pink-600" : "text-gray-400"
-                            }
-                            aria-hidden="true"
+                    {!(
+                      userId &&
+                      post.user_id &&
+                      post.user_id === userId
+                    ) ? (
+                      (() => {
+                        const liked =
+                          canInteract && likedPostIds.has(post.id);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!tryInteraction()) return;
+                              void handleLike(post.id);
+                            }}
+                            className={[
+                              "inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium transition-colors",
+                              liked
+                                ? "border-pink-300 bg-pink-50 text-pink-700"
+                                : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
+                            ].join(" ")}
                           >
-                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-                          </svg>
-                          スキ
-                        </button>
-                      );
-                    })()}
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                              className={
+                                liked ? "text-pink-600" : "text-gray-400"
+                              }
+                              aria-hidden="true"
+                            >
+                              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                            </svg>
+                            スキ
+                          </button>
+                        );
+                      })()
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -1185,7 +1204,7 @@ export default function Home() {
                   if (!tryInteraction()) return;
                   setComposeOpen((prev) => !prev);
                 }}
-                className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700"
+                className="fixed bottom-5 right-5 z-[10001] inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700"
                 aria-label="投稿フォームを開く"
                 title="投稿"
               >
@@ -1223,6 +1242,11 @@ export default function Home() {
         }}
         onSubmit={handleNicknameSubmit}
         errorMessage={nicknameModalError}
+      />
+
+      <PostModerationFixedPortal
+        visible={Boolean(canInteract && moderation && !composeOpen)}
+        snapshot={moderation}
       />
     </main>
   );

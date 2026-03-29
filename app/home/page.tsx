@@ -19,6 +19,20 @@ import {
   validateInterestLabelForRegistration,
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
+import {
+  buildReplyPerspectiveBlockMessage,
+  normalizePerspectiveScores,
+  PERSPECTIVE_ATTRIBUTE_LABEL_JA,
+  REPLY_PERSPECTIVE_BLOCK_THRESHOLD,
+} from "@/lib/perspective-labels";
+import {
+  loadModerationSnapshotFromStorage,
+  parseModerateResponse,
+  persistModerationSnapshot,
+  PostModerationFixedPortal,
+  PostModerationInline,
+  type PostModerationSnapshot,
+} from "@/components/post-moderation-test-panel";
 
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
@@ -28,6 +42,19 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
+  users?: {
+    nickname: string | null;
+    avatar_url?: string | null;
+    avatar_placeholder_hex?: string | null;
+  } | null;
+};
+
+type PostReply = {
+  id: number;
+  post_id: number;
+  user_id: string;
+  content: string;
+  created_at?: string;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -94,6 +121,36 @@ export default function HomePage() {
   );
   const [blockOnSubmit, setBlockOnSubmit] = useState(true);
   const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);
+  /** 本投稿の直近 AI 判定（/ と同様にテスト表示） */
+  const [postModeration, setPostModeration] =
+    useState<PostModerationSnapshot | null>(null);
+  const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
+    string | null
+  >(null);
+  const [repliesByPost, setRepliesByPost] = useState<
+    Record<number, PostReply[]>
+  >({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [replySubmittingPostId, setReplySubmittingPostId] = useState<
+    number | null
+  >(null);
+  const [replyComposerPostId, setReplyComposerPostId] = useState<number | null>(
+    null
+  );
+  const [replyModerationByPostId, setReplyModerationByPostId] = useState<
+    Record<
+      number,
+      | {
+          mode: string;
+          overallMax: number;
+          scores: Record<string, number>;
+        }
+      | null
+    >
+  >({});
+  const [replyBlockMessageByPostId, setReplyBlockMessageByPostId] = useState<
+    Record<number, string | null>
+  >({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [interestPlusPending, setInterestPlusPending] = useState(false);
   const profileEditOpenRef = useRef(false);
@@ -105,6 +162,11 @@ export default function HomePage() {
   useEffect(() => {
     if (!needsNickname) setNicknameModalError(null);
   }, [needsNickname]);
+
+  useEffect(() => {
+    const s = loadModerationSnapshotFromStorage();
+    if (s) setPostModeration(s);
+  }, []);
 
   const joinedAtLabel =
     user?.created_at != null
@@ -216,6 +278,76 @@ export default function HomePage() {
       },
     }));
 
+    const postIds = merged.map((p) => p.id);
+    if (postIds.length === 0) {
+      setRepliesByPost({});
+    } else {
+      const { data: replyRows, error: replyErr } = await supabase
+        .from("post_replies")
+        .select("*")
+        .in("post_id", postIds)
+        .order("created_at", { ascending: true });
+
+      if (replyErr) {
+        setErrorMessage(replyErr.message);
+        return;
+      }
+
+      const rlist = (replyRows ?? []) as Array<{
+        id: number;
+        post_id: number;
+        user_id: string;
+        content: string;
+        created_at?: string;
+      }>;
+      const replyAuthorIds = [
+        ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
+      ];
+      const replyProfileByUserId = new Map<
+        string,
+        {
+          nickname: string | null;
+          avatar_url: string | null;
+          avatar_placeholder_hex: string | null;
+        }
+      >();
+      if (replyAuthorIds.length > 0) {
+        const { data: rprofiles, error: rpe } = await supabase
+          .from("users")
+          .select("id, nickname, avatar_url, avatar_placeholder_hex")
+          .in("id", replyAuthorIds);
+        if (rpe) {
+          setErrorMessage(rpe.message);
+          return;
+        }
+        for (const row of rprofiles ?? []) {
+          replyProfileByUserId.set(row.id, {
+            nickname: row.nickname,
+            avatar_url: row.avatar_url ?? null,
+            avatar_placeholder_hex:
+              (row as { avatar_placeholder_hex?: string | null })
+                .avatar_placeholder_hex ?? null,
+          });
+        }
+      }
+
+      const byPost: Record<number, PostReply[]> = {};
+      for (const r of rlist) {
+        const arr = byPost[r.post_id] ?? [];
+        const rp = replyProfileByUserId.get(r.user_id);
+        arr.push({
+          ...r,
+          users: {
+            nickname: rp?.nickname ?? null,
+            avatar_url: rp?.avatar_url ?? null,
+            avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
+          },
+        });
+        byPost[r.post_id] = arr;
+      }
+      setRepliesByPost(byPost);
+    }
+
     setPosts(merged);
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
@@ -259,6 +391,11 @@ export default function HomePage() {
       setProfileNickname(null);
       setProfilePlaceholderHex(null);
       setPosts([]);
+      setRepliesByPost({});
+      setReplyDrafts({});
+      setReplyComposerPostId(null);
+      setReplyModerationByPostId({});
+      setReplyBlockMessageByPostId({});
       return;
     }
 
@@ -292,6 +429,11 @@ export default function HomePage() {
     setInterestConfirm(null);
     setProfileEditOpen(false);
     setProfileReady(false);
+    setRepliesByPost({});
+    setReplyDrafts({});
+    setReplyComposerPostId(null);
+    setReplyModerationByPostId({});
+    setReplyBlockMessageByPostId({});
   };
 
   const handleDeletePost = async (postId: number) => {
@@ -310,8 +452,137 @@ export default function HomePage() {
       return;
     }
 
-    setPosts((prev) => prev.filter((p) => p.id !== postId));
     setErrorMessage(null);
+    await fetchOwnPosts(userId);
+  };
+
+  const handleReplySubmit = async (postId: number) => {
+    if (!userId) return;
+    if (needsNickname) return;
+    const content = (replyDrafts[postId] ?? "").trim();
+    if (!content) return;
+    if (replySubmittingPostId != null) return;
+
+    setReplySubmittingPostId(postId);
+    setErrorMessage(null);
+    setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
+
+    try {
+      const res = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: content,
+          mode: moderationMode,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        overallMax?: number;
+        mode?: string;
+        degraded?: boolean;
+        degradedReason?: string;
+        paragraphs?: Array<{
+          index: number;
+          text: string;
+          maxScore: number;
+          scores: Record<string, number>;
+        }>;
+      };
+      if (!res.ok) {
+        setErrorMessage(json?.error ?? "AI判定に失敗しました。");
+        setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
+        return;
+      }
+      if (json.degraded) {
+        setModerationDegradedMessage(
+          json.degradedReason ??
+            "APIの利用制限などにより、簡易チェックに切り替えました。"
+        );
+      } else {
+        setModerationDegradedMessage(null);
+      }
+
+      const scores = normalizePerspectiveScores(
+        json.paragraphs?.[0]?.scores as Record<string, unknown> | undefined
+      );
+      const overallMax =
+        typeof json.overallMax === "number" ? json.overallMax : 0;
+
+      setReplyModerationByPostId((prev) => ({
+        ...prev,
+        [postId]: {
+          mode: json.mode ?? moderationMode,
+          overallMax,
+          scores,
+        },
+      }));
+
+      if (overallMax > REPLY_PERSPECTIVE_BLOCK_THRESHOLD) {
+        setReplyBlockMessageByPostId((prev) => ({
+          ...prev,
+          [postId]: buildReplyPerspectiveBlockMessage(
+            overallMax,
+            scores,
+            REPLY_PERSPECTIVE_BLOCK_THRESHOLD
+          ),
+        }));
+        return;
+      }
+
+      setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
+
+      const { error } = await supabase.from("post_replies").insert({
+        post_id: postId,
+        user_id: userId,
+        content,
+      });
+
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+
+      setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
+      await fetchOwnPosts(userId);
+    } catch (err) {
+      console.error("reply moderation error:", err);
+      setErrorMessage("AI判定に失敗しました。");
+      setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
+    } finally {
+      setReplySubmittingPostId(null);
+    }
+  };
+
+  const handleDeleteReply = async (replyId: number) => {
+    if (!userId) return;
+    if (!window.confirm("この返信を削除しますか？")) return;
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("post_replies")
+      .delete()
+      .eq("id", replyId);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    await fetchOwnPosts(userId);
+  };
+
+  const canInteract =
+    Boolean(userId) && profileReady && !needsNickname;
+
+  const tryInteraction = (): boolean => {
+    if (needsNickname) return false;
+    if (!userId) {
+      setErrorMessage("ログインしてください。");
+      return false;
+    }
+    if (!profileReady) {
+      setErrorMessage("プロフィールを読み込み中です。");
+      return false;
+    }
+    return true;
   };
 
   const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -332,12 +603,22 @@ export default function HomePage() {
       }),
     });
     const moderationJson = (await moderationRes.json().catch(() => null)) as
-      | { overallMax?: number; error?: string }
+      | {
+          error?: string;
+          overallMax?: number;
+          degraded?: boolean;
+        }
       | null;
     if (!moderationRes.ok) {
       setErrorMessage(moderationJson?.error ?? "AI判定に失敗しました。");
       setSubmitting(false);
       return;
+    }
+
+    const snap = parseModerateResponse(moderationJson);
+    if (snap) {
+      setPostModeration(snap);
+      persistModerationSnapshot(snap);
     }
 
     if (
@@ -1004,6 +1285,12 @@ export default function HomePage() {
           </div>
         ) : null}
 
+        {moderationDegradedMessage ? (
+          <div className="mb-4 rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-amber-950">
+            {moderationDegradedMessage}
+          </div>
+        ) : null}
+
         {errorMessage?.trim() ? (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             {errorMessage}
@@ -1026,7 +1313,7 @@ export default function HomePage() {
               あなたの投稿（新しい順）
             </h2>
             {composeOpen ? (
-              <div className="fixed inset-x-4 bottom-20 z-50 md:inset-x-auto md:right-6 md:w-[34rem]">
+              <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form
                   onSubmit={handleSubmitPost}
                   className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
@@ -1092,6 +1379,7 @@ export default function HomePage() {
                     </div>
                   </div>
                 </details>
+                <PostModerationInline snapshot={postModeration} />
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -1131,8 +1419,8 @@ export default function HomePage() {
                     key={post.id}
                     className="break-words rounded-lg border border-gray-200 bg-white p-4"
                   >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-gray-800">
                         <UserAvatar
                           name={post.users?.nickname ?? null}
                           avatarUrl={post.users?.avatar_url ?? null}
@@ -1145,17 +1433,194 @@ export default function HomePage() {
                       <button
                         type="button"
                         onClick={() => void handleDeletePost(post.id)}
-                        className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                        className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
                       >
                         削除
                       </button>
                     </div>
                     <div className="mt-1 text-sm text-gray-500">
-                      {post.created_at ? new Date(post.created_at).toLocaleString() : ""}
+                      {post.created_at
+                        ? new Date(post.created_at).toLocaleString()
+                        : ""}
                     </div>
                     <div className="mt-1 whitespace-pre-wrap break-words">
                       {renderTextWithLinks(post.content)}
                     </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!tryInteraction()) return;
+                          if (replyComposerPostId === post.id) {
+                            setReplyComposerPostId(null);
+                            setReplyModerationByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                            setReplyBlockMessageByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                          } else {
+                            setReplyComposerPostId(post.id);
+                            setReplyModerationByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                            setReplyBlockMessageByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                          }
+                        }}
+                        className={[
+                          "rounded-md border px-3 py-1 text-sm font-medium transition-colors",
+                          replyComposerPostId === post.id
+                            ? "border-blue-400 bg-blue-50 text-blue-800"
+                            : "border-gray-300 bg-white text-gray-800 hover:bg-gray-50",
+                        ].join(" ")}
+                        aria-expanded={replyComposerPostId === post.id}
+                      >
+                        {replyComposerPostId === post.id
+                          ? "返信を閉じる"
+                          : "返信"}
+                      </button>
+                    </div>
+                    {(repliesByPost[post.id] ?? []).length > 0 ? (
+                      <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3 text-sm">
+                        {(repliesByPost[post.id] ?? []).map((r) => (
+                          <li
+                            key={r.id}
+                            className="rounded-md bg-gray-50/80 px-2 py-2"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-gray-600">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                {r.user_id ? (
+                                  <Link
+                                    href={`/home/${r.user_id}`}
+                                    className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
+                                  >
+                                    <UserAvatar
+                                      name={r.users?.nickname ?? null}
+                                      avatarUrl={r.users?.avatar_url ?? null}
+                                      placeholderHex={
+                                        r.users?.avatar_placeholder_hex ?? null
+                                      }
+                                    />
+                                    <span className="truncate">
+                                      {r.users?.nickname ?? "（未設定）"}
+                                    </span>
+                                  </Link>
+                                ) : null}
+                                <span className="text-gray-400">
+                                  {r.created_at
+                                    ? new Date(r.created_at).toLocaleString()
+                                    : ""}
+                                </span>
+                              </div>
+                              {canInteract && userId === r.user_id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteReply(r.id)}
+                                  className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700 hover:bg-red-100"
+                                >
+                                  削除
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 whitespace-pre-wrap break-words text-gray-800">
+                              {renderTextWithLinks(r.content)}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {canInteract && replyComposerPostId === post.id ? (
+                      <div className="mt-3 border-t border-gray-100 pt-3">
+                        <textarea
+                          value={replyDrafts[post.id] ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setReplyDrafts((prev) => ({
+                              ...prev,
+                              [post.id]: v,
+                            }));
+                            setReplyBlockMessageByPostId((p) => ({
+                              ...p,
+                              [post.id]: null,
+                            }));
+                          }}
+                          rows={3}
+                          maxLength={2000}
+                          placeholder="返信を入力…"
+                          autoFocus
+                          className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                        />
+                        {replyModerationByPostId[post.id] ? (
+                          <div className="mb-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs">
+                            <div className="font-medium text-gray-800">
+                              返信・AI判定（mode:{" "}
+                              {replyModerationByPostId[post.id]!.mode} / max:{" "}
+                              {replyModerationByPostId[post.id]!.overallMax.toFixed(
+                                3
+                              )}{" "}
+                              / ブロック閾値:{" "}
+                              {REPLY_PERSPECTIVE_BLOCK_THRESHOLD}）
+                            </div>
+                            <div className="mt-1.5 flex flex-wrap gap-1.5 text-gray-700">
+                              {Object.entries(
+                                replyModerationByPostId[post.id]!.scores
+                              )
+                                .sort(([a], [b]) => a.localeCompare(b))
+                                .map(([k, v]) => (
+                                  <span
+                                    key={k}
+                                    className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
+                                  >
+                                    {PERSPECTIVE_ATTRIBUTE_LABEL_JA[k] ?? k}:{" "}
+                                    {Number(v).toFixed(3)}
+                                  </span>
+                                ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {replyBlockMessageByPostId[post.id]?.trim() ? (
+                          <p className="mb-2 text-sm font-medium leading-snug text-red-600">
+                            {replyBlockMessageByPostId[post.id]}
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={replySubmittingPostId === post.id}
+                            onClick={() => void handleReplySubmit(post.id)}
+                            className="rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+                          >
+                            {replySubmittingPostId === post.id
+                              ? "送信中…"
+                              : "返信する"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={replySubmittingPostId === post.id}
+                            onClick={() => {
+                              setReplyComposerPostId(null);
+                              setReplyModerationByPostId((p) => ({
+                                ...p,
+                                [post.id]: null,
+                              }));
+                              setReplyBlockMessageByPostId((p) => ({
+                                ...p,
+                                [post.id]: null,
+                              }));
+                            }}
+                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            キャンセル
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1164,7 +1629,7 @@ export default function HomePage() {
               type="button"
               disabled={interestConfirm != null}
               onClick={() => setComposeOpen((prev) => !prev)}
-              className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700 disabled:pointer-events-none disabled:opacity-30"
+              className="fixed bottom-5 right-5 z-[10001] inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700 disabled:pointer-events-none disabled:opacity-30"
               aria-label="投稿フォームを開く"
               title="投稿"
             >
@@ -1183,6 +1648,17 @@ export default function HomePage() {
         }}
         onSubmit={handleNicknameRequiredSubmit}
         errorMessage={nicknameModalError}
+      />
+
+      <PostModerationFixedPortal
+        visible={Boolean(
+          userId &&
+            profileReady &&
+            !needsNickname &&
+            postModeration &&
+            !composeOpen
+        )}
+        snapshot={postModeration}
       />
     </main>
     {interestConfirm ? (
