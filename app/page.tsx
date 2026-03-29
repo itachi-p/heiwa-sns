@@ -22,6 +22,15 @@ type Post = {
   users?: { nickname: string | null; avatar_url?: string | null } | null;
 };
 
+type PostReply = {
+  id: number;
+  post_id: number;
+  user_id: string;
+  content: string;
+  created_at?: string;
+  users?: { nickname: string | null; avatar_url?: string | null } | null;
+};
+
 const AUTH_TIMEOUT_MS = 15000;
 
 function formatAuthError(error: unknown, fallback: string) {
@@ -138,7 +147,17 @@ export default function Home() {
   } | null>(null);
   const [moderationMode, setModerationMode] = useState<
     "mock" | "perspective"
-  >("mock");
+  >("perspective");
+  const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
+    string | null
+  >(null);
+  const [repliesByPost, setRepliesByPost] = useState<
+    Record<number, PostReply[]>
+  >({});
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [replySubmittingPostId, setReplySubmittingPostId] = useState<
+    number | null
+  >(null);
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
   const [authSubmitting, setAuthSubmitting] = useState(false);
@@ -216,6 +235,69 @@ export default function Home() {
     }));
 
     setPosts(merged);
+
+    const postIds = merged.map((p) => p.id);
+    if (postIds.length === 0) {
+      setRepliesByPost({});
+    } else {
+      const { data: replyRows, error: replyErr } = await supabase
+        .from("post_replies")
+        .select("*")
+        .in("post_id", postIds)
+        .order("created_at", { ascending: true });
+
+      if (replyErr) {
+        setErrorMessage(replyErr.message);
+        return;
+      }
+
+      const rlist = (replyRows ?? []) as Array<{
+        id: number;
+        post_id: number;
+        user_id: string;
+        content: string;
+        created_at?: string;
+      }>;
+      const replyAuthorIds = [
+        ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
+      ];
+      const replyProfileByUserId = new Map<
+        string,
+        { nickname: string | null; avatar_url: string | null }
+      >();
+      if (replyAuthorIds.length > 0) {
+        const { data: rprofiles, error: rpe } = await supabase
+          .from("users")
+          .select("id, nickname, avatar_url")
+          .in("id", replyAuthorIds);
+        if (rpe) {
+          setErrorMessage(rpe.message);
+          return;
+        }
+        for (const row of rprofiles ?? []) {
+          replyProfileByUserId.set(row.id, {
+            nickname: row.nickname,
+            avatar_url: row.avatar_url ?? null,
+          });
+        }
+      }
+
+      const byPost: Record<number, PostReply[]> = {};
+      for (const r of rlist) {
+        const arr = byPost[r.post_id] ?? [];
+        arr.push({
+          ...r,
+          users: {
+            nickname: replyProfileByUserId.get(r.user_id)?.nickname ?? null,
+            avatar_url:
+              replyProfileByUserId.get(r.user_id)?.avatar_url ?? null,
+          },
+        });
+        byPost[r.post_id] = arr;
+      }
+      setRepliesByPost(byPost);
+    }
+
     setErrorMessage(null);
   };
 
@@ -300,29 +382,36 @@ export default function Home() {
     })();
   }, [userId, user]);
 
-  /** nickname 確定後に投稿・いいね取得 */
+  /** タイムライン本文（未ログインでも閲覧可）。ログイン済みかつプロフィール取得後にいいね取得 */
   useEffect(() => {
-    if (!userId || !profileReady || needsNickname) {
-      if (!userId || !profileReady) {
-        startTransition(() => {
-          setPosts([]);
-          setLikedPostIds(new Set());
-        });
-      }
-      return;
-    }
+    if (!authReady) return;
+    if (userId && !profileReady) return;
 
-    const run = async () => {
+    void (async () => {
       try {
         await fetchPosts();
-        await fetchLikes(userId);
       } catch (err) {
         console.error("fetch error:", err);
         setErrorMessage("データの取得に失敗しました。");
       }
-    };
+    })();
+  }, [authReady, userId, profileReady]);
 
-    void run();
+  useEffect(() => {
+    if (!userId || !profileReady || needsNickname) {
+      if (!userId) {
+        startTransition(() => setLikedPostIds(new Set()));
+      }
+      return;
+    }
+
+    void (async () => {
+      try {
+        await fetchLikes(userId);
+      } catch (err) {
+        console.error("likes fetch error:", err);
+      }
+    })();
   }, [userId, profileReady, needsNickname]);
 
   const signInWithGoogle = async () => {
@@ -406,12 +495,12 @@ export default function Home() {
       setErrorMessage(error.message);
       return;
     }
-    setPosts([]);
     setLikedPostIds(new Set());
     setProfileNickname(null);
     setProfileAvatarUrl(null);
     setProfileReady(false);
     setNicknameDraft("");
+    void fetchPosts();
   };
 
   const handleNicknameSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -442,6 +531,84 @@ export default function Home() {
 
     setProfileNickname(result.value);
     setNicknameDraft("");
+    void fetchPosts();
+  };
+
+  const handleReplySubmit = async (postId: number) => {
+    if (!userId) {
+      setErrorMessage("ログインしてください。");
+      return;
+    }
+    if (needsNickname) {
+      setErrorMessage("先にニックネームを設定してください。");
+      return;
+    }
+    const content = (replyDrafts[postId] ?? "").trim();
+    if (!content) return;
+    if (replySubmittingPostId != null) return;
+
+    setReplySubmittingPostId(postId);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: content,
+          mode: moderationMode,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        overallMax?: number;
+        degraded?: boolean;
+        degradedReason?: string;
+      };
+      if (!res.ok) {
+        setErrorMessage(json?.error ?? "AI判定に失敗しました。");
+        return;
+      }
+      if (json.degraded) {
+        setModerationDegradedMessage(
+          json.degradedReason ??
+            "APIの利用制限などにより、簡易チェックに切り替えました。"
+        );
+      } else {
+        setModerationDegradedMessage(null);
+      }
+      if (
+        blockOnSubmit &&
+        typeof json?.overallMax === "number" &&
+        json.overallMax >= blockThreshold
+      ) {
+        setErrorMessage(
+          `AI判定スコアが高いため返信を保留しました（max=${json.overallMax.toFixed(
+            3
+          )}）。`
+        );
+        return;
+      }
+
+      const { error } = await supabase.from("post_replies").insert({
+        post_id: postId,
+        user_id: userId,
+        content,
+      });
+
+      if (error) {
+        setErrorMessage(error.message);
+        return;
+      }
+
+      setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
+      await fetchPosts();
+    } catch (err) {
+      console.error("reply moderation error:", err);
+      setErrorMessage("AI判定に失敗しました。");
+    } finally {
+      setReplySubmittingPostId(null);
+    }
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -467,12 +634,38 @@ export default function Home() {
           mode: moderationMode,
         }),
       });
-      const json = await res.json();
+      const json = (await res.json()) as {
+        error?: string;
+        overallMax?: number;
+        mode?: "auto" | "mock" | "perspective";
+        truncated?: boolean;
+        paragraphs?: Array<{
+          index: number;
+          text: string;
+          maxScore: number;
+          scores: Record<string, number>;
+        }>;
+        degraded?: boolean;
+        degradedReason?: string;
+      };
       if (!res.ok) {
         setErrorMessage(json?.error ?? "AI判定に失敗しました。");
         return;
       }
-      setModeration(json);
+      if (json.degraded) {
+        setModerationDegradedMessage(
+          json.degradedReason ??
+            "APIの利用制限などにより、簡易チェックに切り替えました。"
+        );
+      } else {
+        setModerationDegradedMessage(null);
+      }
+      setModeration({
+        mode: json.mode ?? "perspective",
+        overallMax: typeof json.overallMax === "number" ? json.overallMax : 0,
+        truncated: Boolean(json.truncated),
+        paragraphs: json.paragraphs ?? [],
+      });
       if (blockOnSubmit && typeof json?.overallMax === "number") {
         if (json.overallMax >= blockThreshold) {
           setErrorMessage(
@@ -557,56 +750,74 @@ export default function Home() {
     });
   };
 
+  const canInteract =
+    Boolean(userId) && profileReady && !needsNickname;
+
   return (
     <main
       className={[
         "min-h-screen text-gray-900",
-        moderationMode === "mock" ? "bg-rose-50" : "bg-sky-50",
+        moderationDegradedMessage
+          ? "bg-amber-50"
+          : moderationMode === "mock"
+            ? "bg-rose-50"
+            : "bg-sky-50",
       ].join(" ")}
     >
-      <div className="mx-auto max-w-xl p-6">
-        <div className="mb-4">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
-            <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
-              {!authReady ? (
-                <span className="text-gray-500">読み込み中…</span>
-              ) : userId ? (
-                <>
-                  <span className="flex items-center gap-2">
-                  <Avatar name={profileNickname} avatarUrl={profileAvatarUrl} />
-                    <span
-                      className="max-w-[200px] truncate text-gray-600"
-                      title={profileNickname ?? ""}
-                    >
-                      {profileNickname ?? "ニックネーム未設定"}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void signOut()}
-                    className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
-                  >
-                    ログアウト
-                  </button>
-                </>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void signInWithGoogle()}
-                    className="rounded border border-gray-300 bg-white px-3 py-1 hover:bg-gray-50"
-                  >
-                    Googleでログイン
-                  </button>
-                </div>
-              )}
-            </div>
+      <header className="sticky top-0 z-40 border-b border-gray-200/90 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-xl flex-wrap items-center justify-between gap-2 px-4 py-2">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-lg font-semibold sm:text-xl">
+              Nagi-SNS(仮名)
+            </h1>
+            <p className="text-xs text-gray-600 sm:text-sm">
+              「数」に追われる荒波から、穏やかな支流へ。
+            </p>
           </div>
-          <p className="mt-1 text-sm text-gray-600">
-            「数」に追われる荒波から、穏やかな支流へ。
-          </p>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
+            {!authReady ? (
+              <span className="text-gray-500">読み込み中…</span>
+            ) : userId ? (
+              <>
+                <span className="flex max-w-[120px] items-center gap-1 sm:max-w-[200px]">
+                  <Avatar
+                    name={profileNickname}
+                    avatarUrl={profileAvatarUrl}
+                  />
+                  <span
+                    className="truncate text-gray-600"
+                    title={profileNickname ?? ""}
+                  >
+                    {profileNickname ?? "ニックネーム未設定"}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 sm:text-sm"
+                >
+                  ログアウト
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void signInWithGoogle()}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 sm:px-3 sm:text-sm"
+              >
+                Googleでログイン
+              </button>
+            )}
+          </div>
         </div>
+      </header>
+
+      <div className="mx-auto max-w-xl p-4 sm:p-6">
+        {moderationDegradedMessage ? (
+          <div className="mb-4 rounded-md border border-amber-300 bg-amber-100 p-3 text-sm text-amber-950">
+            {moderationDegradedMessage}
+          </div>
+        ) : null}
 
         {errorMessage ? (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -615,9 +826,12 @@ export default function Home() {
         ) : null}
 
         {!userId && authReady ? (
-          <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4">
-            <p className="mb-3 text-sm text-gray-600">
-              投稿・スキを利用するにはログインしてください。
+          <details className="mb-4 rounded-lg border border-gray-200 bg-white p-3">
+            <summary className="cursor-pointer text-sm font-medium text-gray-800">
+              メールでログイン・新規登録
+            </summary>
+            <p className="mt-2 text-xs text-gray-600">
+              投稿・スキ・返信にはログインが必要です。まずは下のタイムラインを閲覧できます。
             </p>
             <div className="mb-3 flex items-center gap-2 text-xs">
               <span className="text-gray-500">現在のモード:</span>
@@ -692,7 +906,7 @@ export default function Home() {
                 </button>
               </div>
             </form>
-          </div>
+          </details>
         ) : null}
 
         {userId && profileReady && needsNickname ? (
@@ -722,20 +936,33 @@ export default function Home() {
           </form>
         ) : null}
 
-        {userId && profileReady && !needsNickname ? (
+        {authReady && !(userId && !profileReady) ? (
           <>
-            <div className="mb-4 flex items-center gap-2 text-sm">
-              <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-                タイムライン
-              </span>
-              <Link
-                href="/home"
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-              >
-                ホーム
-              </Link>
-            </div>
-            {composeOpen ? (
+            {canInteract ? (
+              <div className="mb-4 flex items-center gap-2 text-sm">
+                <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
+                  タイムライン
+                </span>
+                <Link
+                  href="/home"
+                  className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
+                >
+                  ホーム
+                </Link>
+              </div>
+            ) : null}
+            {!userId ? (
+              <p className="mb-3 text-xs text-gray-600">
+                閲覧のみです。投稿・スキ・返信はログイン後に使えます。
+              </p>
+            ) : null}
+            {userId && profileReady && needsNickname ? (
+              <p className="mb-3 text-xs text-gray-600">
+                ニックネームを設定すると投稿・スキ・返信が使えます。
+              </p>
+            ) : null}
+
+            {canInteract && composeOpen ? (
               <div className="fixed inset-x-4 bottom-20 z-50 md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form
                   onSubmit={handleSubmit}
@@ -897,35 +1124,101 @@ export default function Home() {
                   <div className="mt-1 whitespace-pre-wrap break-words">
                     {renderTextWithLinks(post.content)}
                   </div>
-                  <div className="mt-3">
-                    {(() => {
-                      const liked = likedPostIds.has(post.id);
-                      return (
-                        <button
-                          type="button"
-                          onClick={() => void handleLike(post.id)}
-                          className={[
-                            "inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium transition-colors",
-                            liked
-                              ? "border-pink-300 bg-pink-50 text-pink-700"
-                              : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
-                          ].join(" ")}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                            className={liked ? "text-pink-600" : "text-gray-400"}
-                            aria-hidden="true"
+                  {canInteract ? (
+                    <div className="mt-3">
+                      {(() => {
+                        const liked = likedPostIds.has(post.id);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => void handleLike(post.id)}
+                            className={[
+                              "inline-flex items-center gap-2 rounded-md border px-3 py-1 text-sm font-medium transition-colors",
+                              liked
+                                ? "border-pink-300 bg-pink-50 text-pink-700"
+                                : "border-gray-300 bg-white text-gray-900 hover:bg-gray-50",
+                            ].join(" ")}
                           >
-                            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-                          </svg>
-                          スキ
-                        </button>
-                      );
-                    })()}
-                  </div>
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="currentColor"
+                              className={
+                                liked ? "text-pink-600" : "text-gray-400"
+                              }
+                              aria-hidden="true"
+                            >
+                              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                            </svg>
+                            スキ
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+                  {(repliesByPost[post.id] ?? []).length > 0 ? (
+                    <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3 text-sm">
+                      {(repliesByPost[post.id] ?? []).map((r) => (
+                        <li key={r.id} className="rounded-md bg-gray-50/80 px-2 py-2">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                            {r.user_id ? (
+                              <Link
+                                href={`/home/${r.user_id}`}
+                                className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
+                              >
+                                <Avatar
+                                  name={r.users?.nickname ?? null}
+                                  avatarUrl={r.users?.avatar_url ?? null}
+                                />
+                                <span className="truncate">
+                                  {r.users?.nickname ?? "（未設定）"}
+                                </span>
+                              </Link>
+                            ) : null}
+                            <span className="text-gray-400">
+                              {r.created_at
+                                ? new Date(r.created_at).toLocaleString()
+                                : ""}
+                            </span>
+                          </div>
+                          <div className="mt-1 whitespace-pre-wrap break-words text-gray-800">
+                            {renderTextWithLinks(r.content)}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {canInteract ? (
+                    <div className="mt-3 border-t border-gray-100 pt-3">
+                      <label className="mb-1 block text-xs font-medium text-gray-600">
+                        返信
+                      </label>
+                      <textarea
+                        value={replyDrafts[post.id] ?? ""}
+                        onChange={(e) =>
+                          setReplyDrafts((prev) => ({
+                            ...prev,
+                            [post.id]: e.target.value.replace(/[\n\r]/g, ""),
+                          }))
+                        }
+                        rows={2}
+                        maxLength={2000}
+                        placeholder="返信を入力…"
+                        className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                      />
+                      <button
+                        type="button"
+                        disabled={replySubmittingPostId === post.id}
+                        onClick={() => void handleReplySubmit(post.id)}
+                        className="rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-900 disabled:opacity-50"
+                      >
+                        {replySubmittingPostId === post.id
+                          ? "送信中…"
+                          : "返信する"}
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
                   ))}
                 </ul>
@@ -933,12 +1226,26 @@ export default function Home() {
             </section>
             <button
               type="button"
-              onClick={() => setComposeOpen((prev) => !prev)}
+              onClick={() => {
+                if (!userId) {
+                  setErrorMessage("投稿するにはログインしてください。");
+                  return;
+                }
+                if (!profileReady) {
+                  setErrorMessage("プロフィールを読み込み中です。");
+                  return;
+                }
+                if (needsNickname) {
+                  setErrorMessage("先にニックネームを設定してください。");
+                  return;
+                }
+                setComposeOpen((prev) => !prev);
+              }}
               className="fixed bottom-5 right-5 z-50 inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700"
               aria-label="投稿フォームを開く"
               title="投稿"
             >
-              {composeOpen ? "×" : "+"}
+              {composeOpen && canInteract ? "×" : "+"}
             </button>
           </>
         ) : null}
