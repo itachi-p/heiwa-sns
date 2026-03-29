@@ -3,7 +3,12 @@
 import Link from "next/link";
 import React, { useEffect, useRef, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
+import { NicknameRequiredModal } from "@/components/nickname-required-modal";
+import { SiteHeader } from "@/components/site-header";
+import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
+import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
+import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import {
   filterPresetRows,
   MAX_CUSTOM_INTEREST_LEN,
@@ -23,7 +28,11 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
-  users?: { nickname: string | null; avatar_url?: string | null } | null;
+  users?: {
+    nickname: string | null;
+    avatar_url?: string | null;
+    avatar_placeholder_hex?: string | null;
+  } | null;
 };
 
 function renderTextWithLinks(text: string) {
@@ -47,49 +56,15 @@ function renderTextWithLinks(text: string) {
   });
 }
 
-function getAvatarLabel(name: string | null | undefined) {
-  const value = (name ?? "").trim();
-  if (!value) return "?";
-  return value[0]!.toUpperCase();
-}
-
-function Avatar({
-  name,
-  avatarUrl,
-  size = "sm",
-}: {
-  name: string | null | undefined;
-  avatarUrl?: string | null;
-  size?: "sm" | "lg";
-}) {
-  const sizeClass =
-    size === "lg"
-      ? "h-24 w-24 text-2xl"
-      : "h-8 w-8 text-xs";
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name ? `${name}のアイコン` : "ユーザーアイコン"}
-        className={`${sizeClass} shrink-0 rounded-full border border-blue-100 object-cover`}
-      />
-    );
-  }
-  return (
-    <span
-      className={`inline-flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700`}
-    >
-      {getAvatarLabel(name)}
-    </span>
-  );
-}
-
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
   const [profileNickname, setProfileNickname] = useState<string | null>(null);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
+  const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
+    string | null
+  >(null);
   const [profileBio, setProfileBio] = useState("");
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
@@ -108,6 +83,9 @@ export default function HomePage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [nicknameModalError, setNicknameModalError] = useState<string | null>(
+    null
+  );
   const [composeOpen, setComposeOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -121,6 +99,13 @@ export default function HomePage() {
   const profileEditOpenRef = useRef(false);
 
   const userId = user?.id ?? null;
+  const needsNickname =
+    Boolean(userId) && profileReady && profileNickname === null;
+
+  useEffect(() => {
+    if (!needsNickname) setNicknameModalError(null);
+  }, [needsNickname]);
+
   const joinedAtLabel =
     user?.created_at != null
       ? new Date(user.created_at).toLocaleDateString("ja-JP")
@@ -151,13 +136,16 @@ export default function HomePage() {
 
     const profileRes = await supabase
       .from("users")
-      .select("nickname, avatar_url, bio, interest_custom_creations_count")
+      .select(
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count"
+      )
       .eq("id", uid)
       .maybeSingle();
 
     type ProfileRow = {
       nickname: string | null;
       avatar_url: string | null;
+      avatar_placeholder_hex?: string | null;
       bio: string | null;
       interest_custom_creations_count?: number | null;
     };
@@ -166,7 +154,7 @@ export default function HomePage() {
     if (profileRes.error) {
       const fallback = await supabase
         .from("users")
-        .select("nickname, avatar_url, bio")
+        .select("nickname, avatar_url, avatar_placeholder_hex, bio")
         .eq("id", uid)
         .maybeSingle();
       if (fallback.error) {
@@ -217,15 +205,21 @@ export default function HomePage() {
 
     const nickname = profile?.nickname ?? null;
     const avatarUrl = profile?.avatar_url ?? null;
+    const placeholderHex = profile?.avatar_placeholder_hex ?? null;
     const bio = profile?.bio ?? "";
     const merged = ((rows ?? []) as Post[]).map((p) => ({
       ...p,
-      users: { nickname, avatar_url: avatarUrl },
+      users: {
+        nickname,
+        avatar_url: avatarUrl,
+        avatar_placeholder_hex: placeholderHex,
+      },
     }));
 
     setPosts(merged);
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
+    setProfilePlaceholderHex(placeholderHex);
     setProfileBio(bio);
     setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
@@ -263,6 +257,7 @@ export default function HomePage() {
     if (!userId || !user) {
       setProfileReady(false);
       setProfileNickname(null);
+      setProfilePlaceholderHex(null);
       setPosts([]);
       return;
     }
@@ -285,6 +280,7 @@ export default function HomePage() {
     setPosts([]);
     setProfileNickname(null);
     setProfileAvatarUrl(null);
+    setProfilePlaceholderHex(null);
     setProfileBio("");
     setPresetRows([]);
     setInterestPicksServer([]);
@@ -463,21 +459,39 @@ export default function HomePage() {
       }
     }
 
-    const { error } = await supabase
-      .from("users")
-      .update({
-        nickname: result.value,
-        bio: bioDraft.trim(),
-        interest_custom_creations_count: customCreationsUsed,
-      })
-      .eq("id", userId);
+    const hex =
+      profilePlaceholderHex ?? pickAvatarPlaceholderHex();
+    const baseUpdate = {
+      nickname: result.value,
+      bio: bioDraft.trim(),
+      interest_custom_creations_count: customCreationsUsed,
+    };
+    const patch = !profilePlaceholderHex
+      ? { ...baseUpdate, avatar_placeholder_hex: hex }
+      : baseUpdate;
+
+    let appliedHex: string | null = !profilePlaceholderHex ? hex : null;
+    let { error } = await supabase.from("users").update(patch).eq("id", userId);
+
+    if (
+      error &&
+      isMissingAvatarPlaceholderHexError(error) &&
+      appliedHex != null
+    ) {
+      appliedHex = null;
+      ({ error } = await supabase
+        .from("users")
+        .update(baseUpdate)
+        .eq("id", userId));
+    }
 
     if (error) {
       const pgErr = error as PostgrestError;
       if (pgErr.code === "23505") {
         setErrorMessage("そのニックネームは既に使われています。");
       } else {
-        setErrorMessage(error.message);
+        const msg = (error.message ?? "").trim();
+        setErrorMessage(msg || "保存に失敗しました。");
       }
       setProfileSaving(false);
       return;
@@ -485,9 +499,61 @@ export default function HomePage() {
 
     setProfileNickname(result.value);
     setProfileBio(bioDraft.trim());
+    if (appliedHex) {
+      setProfilePlaceholderHex(appliedHex);
+    }
     await fetchOwnPosts(userId);
     setProfileSaving(false);
     setProfileEditOpen(false);
+  };
+
+  const handleNicknameRequiredSubmit = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
+    e.preventDefault();
+    if (!userId) return;
+
+    const result = validateNickname(nicknameDraft);
+    if (!result.ok) {
+      setNicknameModalError(result.message);
+      return;
+    }
+
+    setNicknameModalError(null);
+    const hex = pickAvatarPlaceholderHex();
+    let savedPlaceholderHex: string | null = hex;
+    let { error } = await supabase
+      .from("users")
+      .update({
+        nickname: result.value,
+        avatar_placeholder_hex: hex,
+      })
+      .eq("id", userId);
+
+    if (error && isMissingAvatarPlaceholderHexError(error)) {
+      savedPlaceholderHex = null;
+      ({ error } = await supabase
+        .from("users")
+        .update({ nickname: result.value })
+        .eq("id", userId));
+    }
+
+    if (error) {
+      const pgErr = error as PostgrestError;
+      if (pgErr.code === "23505") {
+        setNicknameModalError("そのニックネームは既に使われています。");
+        return;
+      }
+      const msg = (error.message ?? "").trim();
+      setNicknameModalError(msg || "保存に失敗しました。");
+      return;
+    }
+
+    setNicknameModalError(null);
+    setProfileNickname(result.value);
+    setProfilePlaceholderHex(savedPlaceholderHex);
+    setNicknameDraft(result.value);
+    await fetchOwnPosts(userId);
   };
 
   const toggleProfileEdit = () => {
@@ -703,44 +769,23 @@ export default function HomePage() {
   return (
     <>
     <main className="min-h-screen bg-sky-50 text-gray-900">
-      <div className="mx-auto max-w-xl p-6">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold">Nagi-SNS（仮名）</h1>
-          </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2 text-sm">
-            {!authReady ? (
-              <span className="text-gray-500">読み込み中…</span>
-            ) : userId ? (
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="rounded border border-gray-300 bg-white px-2 py-1 hover:bg-gray-50"
-              >
-                ログアウト
-              </button>
-            ) : null}
-          </div>
-        </div>
+      <SiteHeader
+        authReady={authReady}
+        user={user}
+        profileNickname={profileNickname}
+        profileAvatarUrl={profileAvatarUrl}
+        avatarPlaceholderHex={profilePlaceholderHex}
+        onSignOut={signOut}
+      />
 
-        <div className="mb-4 flex items-center gap-2 text-sm">
-          <Link
-            href="/"
-            className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-          >
-            タイムライン
-          </Link>
-          <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-            ホーム
-          </span>
-        </div>
-
-        {userId && profileReady ? (
+      <div className="mx-auto max-w-xl p-4 sm:p-6">
+        {userId && profileReady && !needsNickname ? (
           <section className="mb-4 text-sm text-gray-700">
             <div className="flex min-w-0 items-start gap-3">
-              <Avatar
+              <UserAvatar
                 name={profileNickname}
                 avatarUrl={profileAvatarUrl}
+                placeholderHex={profilePlaceholderHex}
                 size="lg"
               />
               <div className="min-w-0 flex-1 space-y-1">
@@ -811,9 +856,10 @@ export default function HomePage() {
                     className="cursor-pointer"
                     title={avatarUploading ? "アップロード中..." : "画像を変更"}
                   >
-                    <Avatar
+                    <UserAvatar
                       name={profileNickname}
                       avatarUrl={profileAvatarUrl}
+                      placeholderHex={profilePlaceholderHex}
                       size="lg"
                     />
                     <input
@@ -958,7 +1004,7 @@ export default function HomePage() {
           </div>
         ) : null}
 
-        {errorMessage ? (
+        {errorMessage?.trim() ? (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             {errorMessage}
           </div>
@@ -966,10 +1012,7 @@ export default function HomePage() {
 
         {!userId && authReady ? (
           <div className="rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-700">
-            ログイン後にホーム（あなたの投稿一覧）を表示します。{" "}
-            <Link href="/" className="text-blue-700 underline">
-              タイムラインへ戻る
-            </Link>
+            ログイン後にホーム（あなたのプロフィールと投稿一覧）が表示されます。
           </div>
         ) : null}
 
@@ -977,7 +1020,7 @@ export default function HomePage() {
           <p className="text-gray-600">ホームを読み込み中…</p>
         ) : null}
 
-        {userId && profileReady ? (
+        {userId && profileReady && !needsNickname ? (
           <section>
             <h2 className="mb-3 text-sm font-semibold text-gray-700">
               あなたの投稿（新しい順）
@@ -1090,9 +1133,12 @@ export default function HomePage() {
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
-                        <Avatar
+                        <UserAvatar
                           name={post.users?.nickname ?? null}
                           avatarUrl={post.users?.avatar_url ?? null}
+                          placeholderHex={
+                            post.users?.avatar_placeholder_hex ?? null
+                          }
                         />
                         <span>{post.users?.nickname ?? "（未設定）"}</span>
                       </div>
@@ -1127,6 +1173,17 @@ export default function HomePage() {
           </section>
         ) : null}
       </div>
+
+      <NicknameRequiredModal
+        open={Boolean(userId && profileReady && needsNickname)}
+        nicknameDraft={nicknameDraft}
+        onNicknameDraftChange={(v) => {
+          setNicknameModalError(null);
+          setNicknameDraft(v);
+        }}
+        onSubmit={handleNicknameRequiredSubmit}
+        errorMessage={nicknameModalError}
+      />
     </main>
     {interestConfirm ? (
       <div

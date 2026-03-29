@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import type { InterestPick } from "@/lib/interests";
 
@@ -14,7 +15,11 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
-  users?: { nickname: string | null; avatar_url?: string | null } | null;
+  users?: {
+    nickname: string | null;
+    avatar_url?: string | null;
+    avatar_placeholder_hex?: string | null;
+  } | null;
 };
 
 function isLikelyUserId(s: string): boolean {
@@ -44,41 +49,6 @@ function renderTextWithLinks(text: string) {
   });
 }
 
-function getAvatarLabel(name: string | null | undefined) {
-  const value = (name ?? "").trim();
-  if (!value) return "?";
-  return value[0]!.toUpperCase();
-}
-
-function Avatar({
-  name,
-  avatarUrl,
-  size = "lg",
-}: {
-  name: string | null | undefined;
-  avatarUrl?: string | null;
-  size?: "sm" | "lg";
-}) {
-  const sizeClass =
-    size === "lg" ? "h-24 w-24 text-2xl" : "h-8 w-8 text-xs";
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name ? `${name}のアイコン` : "ユーザーアイコン"}
-        className={`${sizeClass} shrink-0 rounded-full border border-blue-100 object-cover`}
-      />
-    );
-  }
-  return (
-    <span
-      className={`inline-flex ${sizeClass} shrink-0 items-center justify-center rounded-full bg-blue-100 font-semibold text-blue-700`}
-    >
-      {getAvatarLabel(name)}
-    </span>
-  );
-}
-
 export default function UserHomePage() {
   const params = useParams();
   const rawId = typeof params.userId === "string" ? params.userId : "";
@@ -92,6 +62,9 @@ export default function UserHomePage() {
 
   const [nickname, setNickname] = useState<string | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarPlaceholderHex, setAvatarPlaceholderHex] = useState<
+    string | null
+  >(null);
   const [bio, setBio] = useState("");
   const [interestPicks, setInterestPicks] = useState<InterestPick[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -128,7 +101,7 @@ export default function UserHomePage() {
     void (async () => {
       const { data: profile, error: profileErr } = await supabase
         .from("users")
-        .select("nickname, avatar_url, bio")
+        .select("nickname, avatar_url, avatar_placeholder_hex, bio")
         .eq("id", targetId)
         .maybeSingle();
 
@@ -182,13 +155,21 @@ export default function UserHomePage() {
 
       const nick = profile.nickname ?? null;
       const av = profile.avatar_url ?? null;
+      const ph =
+        (profile as { avatar_placeholder_hex?: string | null })
+          .avatar_placeholder_hex ?? null;
       const merged: Post[] = (postRows ?? []).map((p) => ({
         ...p,
-        users: { nickname: nick, avatar_url: av },
+        users: {
+          nickname: nick,
+          avatar_url: av,
+          avatar_placeholder_hex: ph,
+        },
       }));
 
       setNickname(nick);
       setAvatarUrl(av);
+      setAvatarPlaceholderHex(ph);
       setBio(profile.bio ?? "");
       setInterestPicks(picks);
       setPosts(merged);
@@ -252,7 +233,12 @@ export default function UserHomePage() {
 
             <section className="mb-6 text-sm text-gray-700">
               <div className="flex min-w-0 items-start gap-3">
-                <Avatar name={nickname} avatarUrl={avatarUrl} size="lg" />
+                <UserAvatar
+                  name={nickname}
+                  avatarUrl={avatarUrl}
+                  placeholderHex={avatarPlaceholderHex}
+                  size="lg"
+                />
                 <div className="min-w-0 space-y-1">
                   <p className="text-lg font-semibold text-gray-800">
                     {nickname ?? "ニックネーム未設定"}
