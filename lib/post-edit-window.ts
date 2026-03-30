@@ -12,3 +12,12 @@ export function canEditOwnPost(
   if (Number.isNaN(t)) return false;
   return Date.now() - t <= POST_EDIT_WINDOW_MS;
 }
+
+/** 返信本文の編集（投稿と同じ15分窓） */
+export function canEditOwnReply(
+  createdAt: string | undefined,
+  viewerUserId: string | null,
+  replyAuthorId: string | undefined
+): boolean {
+  return canEditOwnPost(createdAt, viewerUserId, replyAuthorId);
+}

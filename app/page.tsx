@@ -9,6 +9,7 @@ import React, {
 import Link from "next/link";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
+import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +23,7 @@ import {
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
 import { canEditOwnPost } from "@/lib/post-edit-window";
+import { partitionRepliesByParent } from "@/lib/reply-tree";
 import {
   loadModerationSnapshotFromStorage,
   parseModerateResponse,
@@ -52,6 +54,7 @@ type PostReply = {
   user_id: string;
   content: string;
   created_at?: string;
+  parent_reply_id?: number | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -146,6 +149,12 @@ export default function Home() {
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [postEditSaving, setPostEditSaving] = useState(false);
+  const [replyParentReplyId, setReplyParentReplyId] = useState<number | null>(
+    null
+  );
+  const [editingReplyId, setEditingReplyId] = useState<number | null>(null);
+  const [editReplyDraft, setEditReplyDraft] = useState("");
+  const [replyEditSaving, setReplyEditSaving] = useState(false);
 
   const userId = user?.id ?? null;
 
@@ -262,6 +271,7 @@ export default function Home() {
         user_id: string;
         content: string;
         created_at?: string;
+        parent_reply_id?: number | null;
       }>;
       const replyAuthorIds = [
         ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
@@ -504,6 +514,16 @@ export default function Home() {
     if (!content) return;
     if (replySubmittingPostId != null) return;
 
+    const flat = repliesByPost[postId] ?? [];
+    const parentReplyId: number | null = replyParentReplyId;
+    if (parentReplyId != null) {
+      const parent = flat.find((x) => x.id === parentReplyId);
+      if (!parent || parent.post_id !== postId) {
+        setErrorMessage("返信先が見つかりません。");
+        return;
+      }
+    }
+
     setReplySubmittingPostId(postId);
     setErrorMessage(null);
     setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
@@ -573,11 +593,21 @@ export default function Home() {
 
       setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
 
-      const { error } = await supabase.from("post_replies").insert({
+      const insertRow: {
+        post_id: number;
+        user_id: string;
+        content: string;
+        parent_reply_id?: number;
+      } = {
         post_id: postId,
         user_id: userId,
         content,
-      });
+      };
+      if (parentReplyId != null) {
+        insertRow.parent_reply_id = parentReplyId;
+      }
+
+      const { error } = await supabase.from("post_replies").insert(insertRow);
 
       if (error) {
         setErrorMessage(error.message);
@@ -585,6 +615,7 @@ export default function Home() {
       }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
+      setReplyParentReplyId(null);
       /** 判定パネルは残す（閉じる・キャンセル・次の送信開始で消える） */
       await fetchPosts();
     } catch (err) {
@@ -608,6 +639,30 @@ export default function Home() {
       setErrorMessage(error.message);
       return;
     }
+    if (editingReplyId === replyId) setEditingReplyId(null);
+    await fetchPosts();
+  };
+
+  const handleSaveReplyEdit = async (replyId: number) => {
+    if (!userId) return;
+    const content = editReplyDraft.trim();
+    if (!content) {
+      setErrorMessage("本文を入力してください。");
+      return;
+    }
+    setReplyEditSaving(true);
+    setErrorMessage(null);
+    const { error } = await supabase
+      .from("post_replies")
+      .update({ content })
+      .eq("id", replyId)
+      .eq("user_id", userId);
+    setReplyEditSaving(false);
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    setEditingReplyId(null);
     await fetchPosts();
   };
 
@@ -1107,6 +1162,7 @@ export default function Home() {
                         if (!tryInteraction()) return;
                         if (replyComposerPostId === post.id) {
                           setReplyComposerPostId(null);
+                          setReplyParentReplyId(null);
                           setReplyModerationByPostId((p) => ({
                             ...p,
                             [post.id]: null,
@@ -1117,6 +1173,7 @@ export default function Home() {
                           }));
                         } else {
                           setReplyComposerPostId(post.id);
+                          setReplyParentReplyId(null);
                           setReplyModerationByPostId((p) => ({
                             ...p,
                             [post.id]: null,
@@ -1141,53 +1198,44 @@ export default function Home() {
                     </button>
                   </div>
                   {(repliesByPost[post.id] ?? []).length > 0 ? (
-                    <ul className="mt-3 space-y-2 border-t border-gray-100 pt-3 text-sm">
-                      {(repliesByPost[post.id] ?? []).map((r) => (
-                        <li key={r.id} className="rounded-md bg-gray-50/80 px-2 py-2">
-                          <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-gray-600">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              {r.user_id ? (
-                                <Link
-                                  href={`/home/${r.user_id}`}
-                                  className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
-                                >
-                                  <UserAvatar
-                                    name={r.users?.nickname ?? null}
-                                    avatarUrl={r.users?.avatar_url ?? null}
-                                    placeholderHex={
-                                      r.users?.avatar_placeholder_hex ?? null
-                                    }
-                                  />
-                                  <span className="truncate">
-                                    {r.users?.nickname ?? "（未設定）"}
-                                  </span>
-                                </Link>
-                              ) : null}
-                              <span className="text-gray-400">
-                                {r.created_at
-                                  ? new Date(r.created_at).toLocaleString()
-                                  : ""}
-                              </span>
-                            </div>
-                            {canInteract && userId === r.user_id ? (
-                              <button
-                                type="button"
-                                onClick={() => void handleDeleteReply(r.id)}
-                                className="shrink-0 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700 hover:bg-red-100"
-                              >
-                                削除
-                              </button>
-                            ) : null}
-                          </div>
-                          <div className="mt-1 whitespace-pre-wrap break-words text-gray-800">
-                            {renderTextWithLinks(r.content)}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
+                      {(() => {
+                        const flat = repliesByPost[post.id] ?? [];
+                        const { roots, childrenByParent } =
+                          partitionRepliesByParent(flat);
+                        return (
+                          <ReplyThread
+                            roots={roots}
+                            childrenByParent={childrenByParent}
+                            userId={userId}
+                            canInteract={canInteract}
+                            editingReplyId={editingReplyId}
+                            editReplyDraft={editReplyDraft}
+                            replyEditSaving={replyEditSaving}
+                            onEditDraftChange={setEditReplyDraft}
+                            onStartEdit={(r) => {
+                              setEditingReplyId(r.id);
+                              setEditReplyDraft(r.content);
+                            }}
+                            onCancelEdit={() => setEditingReplyId(null)}
+                            onSaveEdit={(rid) => void handleSaveReplyEdit(rid)}
+                            onDelete={handleDeleteReply}
+                            onReplyToReply={(parentReplyId) => {
+                              setReplyComposerPostId(post.id);
+                              setReplyParentReplyId(parentReplyId);
+                            }}
+                          />
+                        );
+                      })()}
+                    </div>
                   ) : null}
                   {canInteract && replyComposerPostId === post.id ? (
                     <div className="mt-3 border-t border-gray-100 pt-3">
+                      {replyParentReplyId != null ? (
+                        <p className="mb-2 text-xs text-gray-600">
+                          選択した返信への返信を入力しています。
+                        </p>
+                      ) : null}
                       <textarea
                         value={replyDrafts[post.id] ?? ""}
                         onChange={(e) => {
@@ -1203,7 +1251,11 @@ export default function Home() {
                         }}
                         rows={3}
                         maxLength={2000}
-                        placeholder="返信を入力…"
+                        placeholder={
+                          replyParentReplyId != null
+                            ? "この返信への返信を入力…"
+                            : "返信を入力…"
+                        }
                         autoFocus
                         className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                       />
@@ -1256,6 +1308,7 @@ export default function Home() {
                           disabled={replySubmittingPostId === post.id}
                           onClick={() => {
                             setReplyComposerPostId(null);
+                            setReplyParentReplyId(null);
                             setReplyModerationByPostId((p) => ({
                               ...p,
                               [post.id]: null,
