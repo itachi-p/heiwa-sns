@@ -40,6 +40,7 @@ type Post = {
   content: string;
   created_at?: string;
   user_id?: string;
+  moderation_max_score?: number;
   /** 表示用（posts には保存せず users から解決） */
   users?: {
     nickname: string | null;
@@ -47,6 +48,9 @@ type Post = {
     avatar_placeholder_hex?: string | null;
   } | null;
 };
+
+const RELATION_PENALTY_MIN_SCORE = 0.2;
+const RELATION_PENALTY_WINDOW_DAYS = 14;
 
 type PostReply = {
   id: number;
@@ -94,6 +98,8 @@ export default function Home() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
+  const [timelineToxicityThreshold, setTimelineToxicityThreshold] =
+    useState(0.7);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
@@ -248,9 +254,46 @@ export default function Home() {
       },
     }));
 
-    setPosts(merged);
+    const relationMultiplierByAuthor = new Map<string, number>();
+    if (userId) {
+      const since = new Date(
+        Date.now() - RELATION_PENALTY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+      ).toISOString();
+      const { data: evRows, error: evErr } = await supabase
+        .from("reply_toxic_events")
+        .select("actor_user_id, max_score")
+        .eq("target_user_id", userId)
+        .gte("created_at", since);
+      if (!evErr) {
+        for (const row of evRows ?? []) {
+          const actor = row.actor_user_id as string;
+          const m = Math.max(0.5, Math.min(0.8, 1 - Number(row.max_score ?? 0)));
+          relationMultiplierByAuthor.set(
+            actor,
+            Math.min(relationMultiplierByAuthor.get(actor) ?? 1, m)
+          );
+        }
+      }
+    }
 
-    const postIds = merged.map((p) => p.id);
+    const timelinePosts = merged
+      .filter((p) => {
+        const score =
+          typeof p.moderation_max_score === "number" ? p.moderation_max_score : 0;
+        return score <= timelineToxicityThreshold;
+      })
+      .sort((a, b) => {
+        const ma = a.user_id ? (relationMultiplierByAuthor.get(a.user_id) ?? 1) : 1;
+        const mb = b.user_id ? (relationMultiplierByAuthor.get(b.user_id) ?? 1) : 1;
+        if (mb !== ma) return mb - ma;
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      });
+
+    setPosts(timelinePosts);
+
+    const postIds = timelinePosts.map((p) => p.id);
     if (postIds.length === 0) {
       setRepliesByPost({});
     } else {
@@ -388,7 +431,7 @@ export default function Home() {
       await ensurePublicUserRow(user);
       const { data, error } = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex")
+        .select("nickname, avatar_url, avatar_placeholder_hex, timeline_toxicity_threshold")
         .eq("id", userId)
         .maybeSingle();
 
@@ -404,6 +447,10 @@ export default function Home() {
       setProfilePlaceholderHex(
         (data as { avatar_placeholder_hex?: string | null } | null)
           ?.avatar_placeholder_hex ?? null
+      );
+      setTimelineToxicityThreshold(
+        (data as { timeline_toxicity_threshold?: number | null } | null)
+          ?.timeline_toxicity_threshold ?? 0.7
       );
       setProfileReady(true);
     })();
@@ -453,6 +500,7 @@ export default function Home() {
     setProfileAvatarUrl(null);
     setProfilePlaceholderHex(null);
     setProfileReady(false);
+    setTimelineToxicityThreshold(0.7);
     setNicknameDraft("");
     void fetchPosts();
   };
@@ -516,9 +564,10 @@ export default function Home() {
 
     const flat = repliesByPost[postId] ?? [];
     const parentReplyId: number | null = replyParentReplyId;
+    const parentReply =
+      parentReplyId != null ? flat.find((x) => x.id === parentReplyId) : null;
     if (parentReplyId != null) {
-      const parent = flat.find((x) => x.id === parentReplyId);
-      if (!parent || parent.post_id !== postId) {
+      if (!parentReply || parentReply.post_id !== postId) {
         setErrorMessage("返信先が見つかりません。");
         return;
       }
@@ -607,11 +656,40 @@ export default function Home() {
         insertRow.parent_reply_id = parentReplyId;
       }
 
-      const { error } = await supabase.from("post_replies").insert(insertRow);
+      const { data: insertedReply, error } = await supabase
+        .from("post_replies")
+        .insert(insertRow)
+        .select("id")
+        .single();
 
       if (error) {
         setErrorMessage(error.message);
         return;
+      }
+
+      const targetUserId =
+        parentReply?.user_id ??
+        posts.find((p) => p.id === postId)?.user_id ??
+        null;
+      if (
+        insertedReply &&
+        targetUserId &&
+        targetUserId !== userId &&
+        overallMax > RELATION_PENALTY_MIN_SCORE &&
+        overallMax < REPLY_PERSPECTIVE_BLOCK_THRESHOLD
+      ) {
+        const { error: evErr } = await supabase
+          .from("reply_toxic_events")
+          .insert({
+            actor_user_id: userId,
+            target_user_id: targetUserId,
+            post_id: postId,
+            reply_id: insertedReply.id,
+            max_score: overallMax,
+          });
+        if (evErr) {
+          console.warn("reply_toxic_events insert failed:", evErr.message);
+        }
       }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
@@ -716,6 +794,7 @@ export default function Home() {
     const content = input.trim();
     if (!content) return;
 
+    let postOverallMax = 0;
     // Test-first: analyze on submit so you can observe score changes quickly.
     try {
       const res = await fetch("/api/moderate", {
@@ -756,6 +835,9 @@ export default function Home() {
       if (snap) {
         setModeration(snap);
         persistModerationSnapshot(snap);
+        postOverallMax = snap.overallMax;
+      } else if (typeof json?.overallMax === "number") {
+        postOverallMax = json.overallMax;
       }
       if (blockOnSubmit && typeof json?.overallMax === "number") {
         if (json.overallMax >= blockThreshold) {
@@ -775,7 +857,11 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from("posts")
-      .insert({ content, user_id: userId })
+      .insert({
+        content,
+        user_id: userId,
+        moderation_max_score: postOverallMax,
+      })
       .select()
       .single();
 

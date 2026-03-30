@@ -38,12 +38,14 @@ import {
 
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
+const RELATION_PENALTY_MIN_SCORE = 0.2;
 
 type Post = {
   id: number;
   content: string;
   created_at?: string;
   user_id?: string;
+  moderation_max_score?: number;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -96,8 +98,11 @@ export default function HomePage() {
     string | null
   >(null);
   const [profileBio, setProfileBio] = useState("");
+  const [profileTimelineToxicityThreshold, setProfileTimelineToxicityThreshold] =
+    useState(0.7);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
+  const [timelineThresholdDraft, setTimelineThresholdDraft] = useState("0.7");
   const [presetRows, setPresetRows] = useState<InterestPick[]>([]);
   const [interestPicksServer, setInterestPicksServer] = useState<
     InterestPick[]
@@ -211,7 +216,7 @@ export default function HomePage() {
     const profileRes = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count"
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, timeline_toxicity_threshold"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -222,13 +227,14 @@ export default function HomePage() {
       avatar_placeholder_hex?: string | null;
       bio: string | null;
       interest_custom_creations_count?: number | null;
+      timeline_toxicity_threshold?: number | null;
     };
 
     let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
     if (profileRes.error) {
       const fallback = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex, bio")
+        .select("nickname, avatar_url, avatar_placeholder_hex, bio, timeline_toxicity_threshold")
         .eq("id", uid)
         .maybeSingle();
       if (fallback.error) {
@@ -281,6 +287,10 @@ export default function HomePage() {
     const avatarUrl = profile?.avatar_url ?? null;
     const placeholderHex = profile?.avatar_placeholder_hex ?? null;
     const bio = profile?.bio ?? "";
+    const threshold =
+      typeof profile?.timeline_toxicity_threshold === "number"
+        ? profile.timeline_toxicity_threshold
+        : 0.7;
     const merged = ((rows ?? []) as Post[]).map((p) => ({
       ...p,
       users: {
@@ -366,6 +376,7 @@ export default function HomePage() {
     setProfileAvatarUrl(avatarUrl);
     setProfilePlaceholderHex(placeholderHex);
     setProfileBio(bio);
+    setProfileTimelineToxicityThreshold(threshold);
     setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
@@ -374,6 +385,7 @@ export default function HomePage() {
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
     setBioDraft(bio);
+    setTimelineThresholdDraft(threshold.toFixed(2));
 
     const warn = [catalogWarning, uiWarning].filter(Boolean).join(" ");
     setErrorMessage(warn || null);
@@ -412,6 +424,8 @@ export default function HomePage() {
       setEditingPostId(null);
       setReplyParentReplyId(null);
       setEditingReplyId(null);
+      setProfileTimelineToxicityThreshold(0.7);
+      setTimelineThresholdDraft("0.7");
       return;
     }
 
@@ -453,6 +467,8 @@ export default function HomePage() {
     setEditingPostId(null);
     setReplyParentReplyId(null);
     setEditingReplyId(null);
+    setProfileTimelineToxicityThreshold(0.7);
+    setTimelineThresholdDraft("0.7");
   };
 
   const handleDeletePost = async (postId: number) => {
@@ -508,9 +524,10 @@ export default function HomePage() {
 
     const flat = repliesByPost[postId] ?? [];
     const parentReplyId: number | null = replyParentReplyId;
+    const parentReply =
+      parentReplyId != null ? flat.find((x) => x.id === parentReplyId) : null;
     if (parentReplyId != null) {
-      const parent = flat.find((x) => x.id === parentReplyId);
-      if (!parent || parent.post_id !== postId) {
+      if (!parentReply || parentReply.post_id !== postId) {
         setErrorMessage("返信先が見つかりません。");
         return;
       }
@@ -599,7 +616,11 @@ export default function HomePage() {
         insertRow.parent_reply_id = parentReplyId;
       }
 
-      const { error } = await supabase.from("post_replies").insert(insertRow);
+      const { data: insertedReply, error } = await supabase
+        .from("post_replies")
+        .insert(insertRow)
+        .select("id")
+        .single();
 
       if (error) {
         setErrorMessage(error.message);
@@ -608,6 +629,30 @@ export default function HomePage() {
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
+      const targetUserId =
+        parentReply?.user_id ??
+        posts.find((p) => p.id === postId)?.user_id ??
+        null;
+      if (
+        insertedReply &&
+        targetUserId &&
+        targetUserId !== userId &&
+        overallMax > RELATION_PENALTY_MIN_SCORE &&
+        overallMax < REPLY_PERSPECTIVE_BLOCK_THRESHOLD
+      ) {
+        const { error: evErr } = await supabase
+          .from("reply_toxic_events")
+          .insert({
+            actor_user_id: userId,
+            target_user_id: targetUserId,
+            post_id: postId,
+            reply_id: insertedReply.id,
+            max_score: overallMax,
+          });
+        if (evErr) {
+          console.warn("reply_toxic_events insert failed:", evErr.message);
+        }
+      }
       await fetchOwnPosts(userId);
     } catch (err) {
       console.error("reply moderation error:", err);
@@ -682,6 +727,7 @@ export default function HomePage() {
     setSubmitting(true);
     setErrorMessage(null);
 
+    let postOverallMax = 0;
     const moderationRes = await fetch("/api/moderate", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -707,6 +753,9 @@ export default function HomePage() {
     if (snap) {
       setPostModeration(snap);
       persistModerationSnapshot(snap);
+      postOverallMax = snap.overallMax;
+    } else if (typeof moderationJson?.overallMax === "number") {
+      postOverallMax = moderationJson.overallMax;
     }
 
     if (
@@ -725,7 +774,11 @@ export default function HomePage() {
 
     const { error } = await supabase
       .from("posts")
-      .insert({ content, user_id: userId });
+      .insert({
+        content,
+        user_id: userId,
+        moderation_max_score: postOverallMax,
+      });
 
     if (error) {
       setErrorMessage(error.message);
@@ -796,6 +849,12 @@ export default function HomePage() {
       setErrorMessage(result.message);
       return;
     }
+    const parsedThreshold = Number(timelineThresholdDraft);
+    const timelineThreshold = Math.max(0.1, Math.min(0.7, parsedThreshold));
+    if (!Number.isFinite(parsedThreshold)) {
+      setErrorMessage("攻撃性しきい値は数値で入力してください。");
+      return;
+    }
 
     setProfileSaving(true);
     setErrorMessage(null);
@@ -834,6 +893,7 @@ export default function HomePage() {
       nickname: result.value,
       bio: bioDraft.trim(),
       interest_custom_creations_count: customCreationsUsed,
+      timeline_toxicity_threshold: timelineThreshold,
     };
     const patch = !profilePlaceholderHex
       ? { ...baseUpdate, avatar_placeholder_hex: hex }
@@ -868,6 +928,8 @@ export default function HomePage() {
 
     setProfileNickname(result.value);
     setProfileBio(bioDraft.trim());
+    setProfileTimelineToxicityThreshold(timelineThreshold);
+    setTimelineThresholdDraft(timelineThreshold.toFixed(2));
     if (appliedHex) {
       setProfilePlaceholderHex(appliedHex);
     }
@@ -1268,6 +1330,23 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
+                    タイムライン攻撃性しきい値（0.1〜0.7）
+                  </label>
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={0.7}
+                    step={0.05}
+                    value={timelineThresholdDraft}
+                    onChange={(e) => setTimelineThresholdDraft(e.target.value)}
+                    className="w-40 rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                  <p className="text-xs text-gray-500">
+                    この値を超える投稿は、あなたのタイムラインに表示しません。
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">
                     趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
                   </label>
                   <p className="text-xs text-gray-500">
@@ -1358,6 +1437,9 @@ export default function HomePage() {
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
+                      setTimelineThresholdDraft(
+                        profileTimelineToxicityThreshold.toFixed(2)
+                      );
                       setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
