@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/finalize-pending-edits",
-      "schedule": "*/1 * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
