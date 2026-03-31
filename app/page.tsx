@@ -20,9 +20,14 @@ import {
   PERSPECTIVE_ATTRIBUTE_LABEL_JA,
   REPLY_PERSPECTIVE_BLOCK_THRESHOLD,
 } from "@/lib/perspective-labels";
+import { fetchTimelineToxicityThreshold } from "@/lib/timeline-threshold";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
-import { canEditOwnPost } from "@/lib/post-edit-window";
+import {
+  canEditOwnPost,
+  formatRemainingLabel,
+  getEditRemainingMs,
+} from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
 import {
   loadModerationSnapshotFromStorage,
@@ -38,6 +43,7 @@ const supabase = createClient();
 type Post = {
   id: number;
   content: string;
+  pending_content?: string | null;
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
@@ -51,12 +57,26 @@ type Post = {
 
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 const RELATION_PENALTY_WINDOW_DAYS = 14;
+const HIGH_RISK_NOTICE_SCORE = 0.9;
+
+function resolveVisibleContent(
+  content: string,
+  pendingContent: string | null | undefined,
+  createdAt: string | undefined
+) {
+  if (!pendingContent?.trim() || !createdAt) return content;
+  const created = new Date(createdAt).getTime();
+  if (Number.isNaN(created)) return content;
+  if (Date.now() - created < 15 * 60 * 1000) return content;
+  return pendingContent;
+}
 
 type PostReply = {
   id: number;
   post_id: number;
   user_id: string;
   content: string;
+  pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
   users?: {
@@ -104,6 +124,8 @@ export default function Home() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -176,6 +198,29 @@ export default function Home() {
     if (s) setModeration(s);
   }, []);
 
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (editingPostId != null) {
+      const post = posts.find((p) => p.id === editingPostId);
+      if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
+        setEditingPostId(null);
+        setNoticeMessage("編集時間が終了しました。最後に保存した内容が15分後に反映されます。");
+      }
+    }
+    if (editingReplyId != null) {
+      const allReplies = Object.values(repliesByPost).flat();
+      const reply = allReplies.find((r) => r.id === editingReplyId);
+      if (reply && getEditRemainingMs(reply.created_at, nowTick) <= 0) {
+        setEditingReplyId(null);
+        setNoticeMessage("編集時間が終了しました。最後に保存した内容が15分後に反映されます。");
+      }
+    }
+  }, [nowTick, editingPostId, editingReplyId, posts, repliesByPost]);
+
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
     const { error } = await supabase.from("users").upsert(
@@ -241,6 +286,7 @@ export default function Home() {
 
     const merged: Post[] = list.map((p) => ({
       ...p,
+      content: resolveVisibleContent(p.content, p.pending_content, p.created_at),
       users: {
         nickname: p.user_id
           ? (profileByUserId.get(p.user_id)?.nickname ?? null)
@@ -313,6 +359,7 @@ export default function Home() {
         post_id: number;
         user_id: string;
         content: string;
+        pending_content?: string | null;
         created_at?: string;
         parent_reply_id?: number | null;
       }>;
@@ -353,6 +400,7 @@ export default function Home() {
         const rp = replyProfileByUserId.get(r.user_id);
         arr.push({
           ...r,
+          content: resolveVisibleContent(r.content, r.pending_content, r.created_at),
           users: {
             nickname: rp?.nickname ?? null,
             avatar_url: rp?.avatar_url ?? null,
@@ -431,7 +479,7 @@ export default function Home() {
       await ensurePublicUserRow(user);
       const { data, error } = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex, timeline_toxicity_threshold")
+        .select("nickname, avatar_url, avatar_placeholder_hex")
         .eq("id", userId)
         .maybeSingle();
 
@@ -449,8 +497,7 @@ export default function Home() {
           ?.avatar_placeholder_hex ?? null
       );
       setTimelineToxicityThreshold(
-        (data as { timeline_toxicity_threshold?: number | null } | null)
-          ?.timeline_toxicity_threshold ?? 0.7
+        await fetchTimelineToxicityThreshold(supabase, userId)
       );
       setProfileReady(true);
     })();
@@ -730,9 +777,10 @@ export default function Home() {
     }
     setReplyEditSaving(true);
     setErrorMessage(null);
+    setNoticeMessage(null);
     const { error } = await supabase
       .from("post_replies")
-      .update({ content })
+      .update({ pending_content: content })
       .eq("id", replyId)
       .eq("user_id", userId);
     setReplyEditSaving(false);
@@ -741,6 +789,7 @@ export default function Home() {
       return;
     }
     setEditingReplyId(null);
+    setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchPosts();
   };
 
@@ -770,9 +819,10 @@ export default function Home() {
     }
     setPostEditSaving(true);
     setErrorMessage(null);
+    setNoticeMessage(null);
     const { error } = await supabase
       .from("posts")
-      .update({ content })
+      .update({ pending_content: content })
       .eq("id", postId)
       .eq("user_id", userId);
     setPostEditSaving(false);
@@ -781,6 +831,7 @@ export default function Home() {
       return;
     }
     setEditingPostId(null);
+    setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchPosts();
   };
 
@@ -839,16 +890,6 @@ export default function Home() {
       } else if (typeof json?.overallMax === "number") {
         postOverallMax = json.overallMax;
       }
-      if (blockOnSubmit && typeof json?.overallMax === "number") {
-        if (json.overallMax >= blockThreshold) {
-          setErrorMessage(
-            `AI判定スコアが高いため投稿を保留しました（max=${json.overallMax.toFixed(
-              3
-            )}）。`
-          );
-          return;
-        }
-      }
     } catch (err) {
       console.error("moderation error:", err);
       setErrorMessage("AI判定に失敗しました。");
@@ -874,6 +915,11 @@ export default function Home() {
     if (data) {
       setInput("");
       setComposeOpen(false);
+      if (postOverallMax >= HIGH_RISK_NOTICE_SCORE) {
+        setNoticeMessage("この投稿は、他の方には表示されにくい可能性があります。");
+      } else {
+        setNoticeMessage(null);
+      }
       await fetchPosts();
     }
   };
@@ -984,6 +1030,11 @@ export default function Home() {
         {errorMessage?.trim() ? (
           <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             {errorMessage}
+          </div>
+        ) : null}
+        {noticeMessage?.trim() ? (
+          <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+            {noticeMessage}
           </div>
         ) : null}
 
@@ -1134,6 +1185,14 @@ export default function Home() {
                     post.user_id &&
                     post.user_id === userId ? (
                       <div className="flex shrink-0 flex-wrap items-center gap-1">
+                        {canEditOwnPost(post.created_at, userId, post.user_id) ? (
+                          <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+                            編集残り{" "}
+                            {formatRemainingLabel(
+                              getEditRemainingMs(post.created_at, nowTick)
+                            )}
+                          </span>
+                        ) : null}
                         {canEditOwnPost(
                           post.created_at,
                           userId,
@@ -1154,7 +1213,7 @@ export default function Home() {
                               type="button"
                               onClick={() => {
                                 setEditingPostId(post.id);
-                                setEditDraft(post.content);
+                                setEditDraft(post.pending_content ?? post.content);
                               }}
                               className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 hover:bg-gray-50"
                             >
@@ -1301,7 +1360,7 @@ export default function Home() {
                             onEditDraftChange={setEditReplyDraft}
                             onStartEdit={(r) => {
                               setEditingReplyId(r.id);
-                              setEditReplyDraft(r.content);
+                              setEditReplyDraft(r.pending_content ?? r.content);
                             }}
                             onCancelEdit={() => setEditingReplyId(null)}
                             onSaveEdit={(rid) => void handleSaveReplyEdit(rid)}

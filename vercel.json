@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/finalize-pending-edits",
+      "schedule": "*/1 * * * *"
+    }
+  ]
+}

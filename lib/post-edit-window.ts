@@ -21,3 +21,22 @@ export function canEditOwnReply(
 ): boolean {
   return canEditOwnPost(createdAt, viewerUserId, replyAuthorId);
 }
+
+export function getEditRemainingMs(
+  createdAt: string | undefined,
+  nowMs: number = Date.now()
+): number {
+  if (!createdAt) return 0;
+  const t = new Date(createdAt).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, POST_EDIT_WINDOW_MS - (nowMs - t));
+}
+
+export function formatRemainingLabel(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const mm = Math.floor(total / 60)
+    .toString()
+    .padStart(2, "0");
+  const ss = (total % 60).toString().padStart(2, "0");
+  return `${mm}:${ss}`;
+}

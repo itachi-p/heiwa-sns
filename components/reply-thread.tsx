@@ -3,13 +3,18 @@
 import Link from "next/link";
 import React from "react";
 import { UserAvatar } from "@/components/user-avatar";
-import { canEditOwnReply } from "@/lib/post-edit-window";
+import {
+  canEditOwnReply,
+  formatRemainingLabel,
+  getEditRemainingMs,
+} from "@/lib/post-edit-window";
 
 export type PostReplyRow = {
   id: number;
   post_id: number;
   user_id: string;
   content: string;
+  pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
   users?: {
@@ -75,6 +80,7 @@ function ReplyItem({
 }: ItemProps) {
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
+  const remainingLabel = formatRemainingLabel(getEditRemainingMs(reply.created_at));
 
   return (
     <li
@@ -107,6 +113,11 @@ function ReplyItem({
           </span>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1">
+          {showEdit ? (
+            <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
+              編集残り {remainingLabel}
+            </span>
+          ) : null}
           {canInteract ? (
             <button
               type="button"
