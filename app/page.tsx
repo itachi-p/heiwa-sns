@@ -115,6 +115,10 @@ function renderPostScores(scores: Record<string, number> | null | undefined) {
     value: typeof scores?.[key] === "number" ? scores[key]!.toFixed(3) : "未測定",
   }));
 }
+type ScoreStages = {
+  first?: Record<string, number>;
+  second?: Record<string, number>;
+};
 
 const POST_SCORE_STORE_KEY = "heiwa_post_scores_by_id";
 const REPLY_SCORE_STORE_KEY = "heiwa_reply_scores_by_id";
@@ -196,10 +200,10 @@ export default function Home() {
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
   const [postScoresById, setPostScoresById] = useState<
-    Record<number, Record<string, number>>
+    Record<number, ScoreStages>
   >({});
   const [replyScoresById, setReplyScoresById] = useState<
-    Record<number, Record<string, number>>
+    Record<number, ScoreStages>
   >({});
 
   const userId = user?.id ?? null;
@@ -221,11 +225,21 @@ export default function Home() {
     try {
       const raw = window.localStorage.getItem(POST_SCORE_STORE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, Record<string, number>>;
-      const next: Record<number, Record<string, number>> = {};
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const next: Record<number, ScoreStages> = {};
       for (const [k, v] of Object.entries(parsed)) {
         const id = Number(k);
-        if (Number.isFinite(id) && v && typeof v === "object") next[id] = v;
+        if (!Number.isFinite(id) || !v || typeof v !== "object") continue;
+        const obj = v as { first?: unknown; second?: unknown };
+        const first =
+          obj.first && typeof obj.first === "object"
+            ? (obj.first as Record<string, number>)
+            : (v as Record<string, number>);
+        const second =
+          obj.second && typeof obj.second === "object"
+            ? (obj.second as Record<string, number>)
+            : undefined;
+        next[id] = { first, second };
       }
       setPostScoresById(next);
     } catch {
@@ -238,11 +252,21 @@ export default function Home() {
     try {
       const raw = window.localStorage.getItem(REPLY_SCORE_STORE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, Record<string, number>>;
-      const next: Record<number, Record<string, number>> = {};
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const next: Record<number, ScoreStages> = {};
       for (const [k, v] of Object.entries(parsed)) {
         const id = Number(k);
-        if (Number.isFinite(id) && v && typeof v === "object") next[id] = v;
+        if (!Number.isFinite(id) || !v || typeof v !== "object") continue;
+        const obj = v as { first?: unknown; second?: unknown };
+        const first =
+          obj.first && typeof obj.first === "object"
+            ? (obj.first as Record<string, number>)
+            : (v as Record<string, number>);
+        const second =
+          obj.second && typeof obj.second === "object"
+            ? (obj.second as Record<string, number>)
+            : undefined;
+        next[id] = { first, second };
       }
       setReplyScoresById(next);
     } catch {
@@ -782,7 +806,10 @@ export default function Home() {
         return;
       }
       if (insertedReply && Object.keys(scores).length > 0) {
-        setReplyScoresById((prev) => ({ ...prev, [insertedReply.id]: scores }));
+        setReplyScoresById((prev) => ({
+          ...prev,
+          [insertedReply.id]: { first: scores },
+        }));
       }
 
       const targetUserId =
@@ -860,6 +887,28 @@ export default function Home() {
       return;
     }
     setEditingReplyId(null);
+    try {
+      const res = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: content, mode: moderationMode }),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { paragraphs?: Array<{ scores?: Record<string, unknown> }> }
+        | null;
+      const second = normalizePerspectiveScores(
+        (json?.paragraphs?.[0]?.scores as Record<string, unknown> | undefined) ??
+          {}
+      );
+      if (Object.keys(second).length > 0) {
+        setReplyScoresById((prev) => ({
+          ...prev,
+          [replyId]: { ...(prev[replyId] ?? {}), second },
+        }));
+      }
+    } catch {
+      // keep edit save successful even if test scoring failed
+    }
     setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchPosts();
   };
@@ -902,6 +951,28 @@ export default function Home() {
       return;
     }
     setEditingPostId(null);
+    try {
+      const res = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: content, mode: moderationMode }),
+      });
+      const json = (await res.json().catch(() => null)) as
+        | { paragraphs?: Array<{ scores?: Record<string, unknown> }> }
+        | null;
+      const second = normalizePerspectiveScores(
+        (json?.paragraphs?.[0]?.scores as Record<string, unknown> | undefined) ??
+          {}
+      );
+      if (Object.keys(second).length > 0) {
+        setPostScoresById((prev) => ({
+          ...prev,
+          [postId]: { ...(prev[postId] ?? {}), second },
+        }));
+      }
+    } catch {
+      // keep edit save successful even if test scoring failed
+    }
     setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchPosts();
   };
@@ -990,7 +1061,10 @@ export default function Home() {
 
     if (data) {
       if (Object.keys(postScores).length > 0) {
-        setPostScoresById((prev) => ({ ...prev, [data.id]: postScores }));
+        setPostScoresById((prev) => ({
+          ...prev,
+          [data.id]: { first: postScores },
+        }));
       }
       setInput("");
       setComposeOpen(false);
@@ -1340,13 +1414,14 @@ export default function Home() {
                       {renderTextWithLinks(post.content)}
                     </div>
                   )}
-                  {postScoresById[post.id] ? (
+                  {postScoresById[post.id]?.first ? (
                     <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
                       <div className="font-medium text-gray-700">
                         攻撃性判定（テスト表示中）
                       </div>
+                      <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
                       <div className="mt-1 flex flex-wrap gap-1.5">
-                        {renderPostScores(postScoresById[post.id]).map((item) => (
+                        {renderPostScores(postScoresById[post.id]?.first).map((item) => (
                           <span
                             key={item.key}
                             className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
@@ -1355,6 +1430,25 @@ export default function Home() {
                           </span>
                         ))}
                       </div>
+                      {postScoresById[post.id]?.second ? (
+                        <>
+                          <div className="mt-2 text-[11px] text-gray-500">
+                            編集確定（15分時点）
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {renderPostScores(postScoresById[post.id]?.second).map(
+                              (item) => (
+                                <span
+                                  key={`second-${item.key}`}
+                                  className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
+                                >
+                                  {item.label}: {item.value}
+                                </span>
+                              )
+                            )}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                   <div className="mt-3 flex flex-wrap items-center gap-2">

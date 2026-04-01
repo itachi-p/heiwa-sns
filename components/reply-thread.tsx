@@ -55,7 +55,13 @@ type ItemProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
-  replyScoresById: Record<number, Record<string, number>>;
+  replyScoresById: Record<
+    number,
+    {
+      first?: Record<string, number>;
+      second?: Record<string, number>;
+    }
+  >;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
@@ -187,9 +193,10 @@ function ReplyItem({
           {renderTextWithLinks(reply.content)}
         </div>
       )}
-      {replyScores ? (
+      {replyScores?.first ? (
         <div className="mt-1 rounded-md border border-gray-100 bg-white p-2 text-xs text-gray-600">
           <div className="font-medium text-gray-700">攻撃性判定（テスト表示中）</div>
+          <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
               (key) => (
@@ -198,13 +205,35 @@ function ReplyItem({
                   className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
                 >
                   {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
-                  {typeof replyScores[key] === "number"
-                    ? replyScores[key]!.toFixed(3)
+                  {typeof replyScores.first?.[key] === "number"
+                    ? replyScores.first[key]!.toFixed(3)
                     : "未測定"}
                 </span>
               )
             )}
           </div>
+          {replyScores.second ? (
+            <>
+              <div className="mt-2 text-[11px] text-gray-500">
+                編集確定（15分時点）
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
+                  (key) => (
+                    <span
+                      key={`second-${key}`}
+                      className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
+                    >
+                      {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
+                      {typeof replyScores.second?.[key] === "number"
+                        ? replyScores.second[key]!.toFixed(3)
+                        : "未測定"}
+                    </span>
+                  )
+                )}
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
       {kids.length > 0 ? (
@@ -243,7 +272,13 @@ type ThreadProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
-  replyScoresById: Record<number, Record<string, number>>;
+  replyScoresById: Record<
+    number,
+    {
+      first?: Record<string, number>;
+      second?: Record<string, number>;
+    }
+  >;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
