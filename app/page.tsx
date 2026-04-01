@@ -107,6 +107,18 @@ function renderTextWithLinks(text: string) {
   });
 }
 
+function renderPostScores(scores: Record<string, number> | null | undefined) {
+  const keys = ["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"];
+  return keys.map((key) => ({
+    key,
+    label: PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key,
+    value: typeof scores?.[key] === "number" ? scores[key]!.toFixed(3) : "未測定",
+  }));
+}
+
+const POST_SCORE_STORE_KEY = "heiwa_post_scores_by_id";
+const REPLY_SCORE_STORE_KEY = "heiwa_reply_scores_by_id";
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -183,6 +195,12 @@ export default function Home() {
   const [editingReplyId, setEditingReplyId] = useState<number | null>(null);
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
+  const [postScoresById, setPostScoresById] = useState<
+    Record<number, Record<string, number>>
+  >({});
+  const [replyScoresById, setReplyScoresById] = useState<
+    Record<number, Record<string, number>>
+  >({});
 
   const userId = user?.id ?? null;
 
@@ -197,6 +215,56 @@ export default function Home() {
     const s = loadModerationSnapshotFromStorage();
     if (s) setModeration(s);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(POST_SCORE_STORE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, Record<string, number>>;
+      const next: Record<number, Record<string, number>> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        const id = Number(k);
+        if (Number.isFinite(id) && v && typeof v === "object") next[id] = v;
+      }
+      setPostScoresById(next);
+    } catch {
+      // ignore malformed local cache
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(REPLY_SCORE_STORE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, Record<string, number>>;
+      const next: Record<number, Record<string, number>> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        const id = Number(k);
+        if (Number.isFinite(id) && v && typeof v === "object") next[id] = v;
+      }
+      setReplyScoresById(next);
+    } catch {
+      // ignore malformed local cache
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      POST_SCORE_STORE_KEY,
+      JSON.stringify(postScoresById)
+    );
+  }, [postScoresById]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      REPLY_SCORE_STORE_KEY,
+      JSON.stringify(replyScoresById)
+    );
+  }, [replyScoresById]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
@@ -713,6 +781,9 @@ export default function Home() {
         setErrorMessage(error.message);
         return;
       }
+      if (insertedReply && Object.keys(scores).length > 0) {
+        setReplyScoresById((prev) => ({ ...prev, [insertedReply.id]: scores }));
+      }
 
       const targetUserId =
         parentReply?.user_id ??
@@ -846,6 +917,7 @@ export default function Home() {
     if (!content) return;
 
     let postOverallMax = 0;
+    let postScores: Record<string, number> = {};
     // Test-first: analyze on submit so you can observe score changes quickly.
     try {
       const res = await fetch("/api/moderate", {
@@ -887,6 +959,10 @@ export default function Home() {
         setModeration(snap);
         persistModerationSnapshot(snap);
         postOverallMax = snap.overallMax;
+        postScores = normalizePerspectiveScores(
+          (json.paragraphs?.[0]?.scores as Record<string, unknown> | undefined) ??
+            {}
+        );
       } else if (typeof json?.overallMax === "number") {
         postOverallMax = json.overallMax;
       }
@@ -913,6 +989,9 @@ export default function Home() {
     }
 
     if (data) {
+      if (Object.keys(postScores).length > 0) {
+        setPostScoresById((prev) => ({ ...prev, [data.id]: postScores }));
+      }
       setInput("");
       setComposeOpen(false);
       if (postOverallMax >= HIGH_RISK_NOTICE_SCORE) {
@@ -1261,6 +1340,23 @@ export default function Home() {
                       {renderTextWithLinks(post.content)}
                     </div>
                   )}
+                  {postScoresById[post.id] ? (
+                    <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
+                      <div className="font-medium text-gray-700">
+                        攻撃性判定（テスト表示中）
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {renderPostScores(postScoresById[post.id]).map((item) => (
+                          <span
+                            key={item.key}
+                            className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
+                          >
+                            {item.label}: {item.value}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {!(
                       userId &&
@@ -1357,6 +1453,7 @@ export default function Home() {
                             editingReplyId={editingReplyId}
                             editReplyDraft={editReplyDraft}
                             replyEditSaving={replyEditSaving}
+                            replyScoresById={replyScoresById}
                             onEditDraftChange={setEditReplyDraft}
                             onStartEdit={(r) => {
                               setEditingReplyId(r.id);

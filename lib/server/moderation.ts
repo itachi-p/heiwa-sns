@@ -5,6 +5,8 @@ type AttributeName =
   | "PROFANITY"
   | "THREAT";
 
+export type ModerationScoreMap = Record<string, number>;
+
 function clamp01(n: unknown) {
   const x = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(x)) return 0;
@@ -85,16 +87,41 @@ export async function scoreTextOverallMax(
   text: string,
   mode: "mock" | "perspective" = "perspective"
 ) {
+  const res = await analyzeTextModeration(text, mode);
+  return res.overallMax;
+}
+
+export async function analyzeTextModeration(
+  text: string,
+  mode: "mock" | "perspective" = "perspective"
+): Promise<{ overallMax: number; scores: ModerationScoreMap }> {
   const normalized = normalizeText(text);
-  if (!normalized) return 0;
+  if (!normalized) return { overallMax: 0, scores: {} };
   if (mode === "mock") {
-    return Math.max(0, ...Object.values(mockScores(normalized)).map((v) => v ?? 0));
+    const scores = mockScores(normalized) as ModerationScoreMap;
+    return {
+      overallMax: Math.max(0, ...Object.values(scores).map((v) => v ?? 0)),
+      scores,
+    };
   }
   try {
     const scores = await analyzeWithPerspective(normalized);
-    if (!scores) return Math.max(0, ...Object.values(mockScores(normalized)).map((v) => v ?? 0));
-    return Math.max(0, ...Object.values(scores).map((v) => v ?? 0));
+    if (!scores) {
+      const fallback = mockScores(normalized) as ModerationScoreMap;
+      return {
+        overallMax: Math.max(0, ...Object.values(fallback).map((v) => v ?? 0)),
+        scores: fallback,
+      };
+    }
+    return {
+      overallMax: Math.max(0, ...Object.values(scores).map((v) => v ?? 0)),
+      scores: scores as ModerationScoreMap,
+    };
   } catch {
-    return Math.max(0, ...Object.values(mockScores(normalized)).map((v) => v ?? 0));
+    const fallback = mockScores(normalized) as ModerationScoreMap;
+    return {
+      overallMax: Math.max(0, ...Object.values(fallback).map((v) => v ?? 0)),
+      scores: fallback,
+    };
   }
 }

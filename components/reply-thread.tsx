@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React from "react";
 import { UserAvatar } from "@/components/user-avatar";
+import { PERSPECTIVE_ATTRIBUTE_LABEL_JA } from "@/lib/perspective-labels";
 import {
   canEditOwnReply,
   formatRemainingLabel,
@@ -54,6 +55,7 @@ type ItemProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
+  replyScoresById: Record<number, Record<string, number>>;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
@@ -71,6 +73,7 @@ function ReplyItem({
   editingReplyId,
   editReplyDraft,
   replyEditSaving,
+  replyScoresById,
   onEditDraftChange,
   onStartEdit,
   onCancelEdit,
@@ -78,6 +81,7 @@ function ReplyItem({
   onDelete,
   onReplyToReply,
 }: ItemProps) {
+  const replyScores = replyScoresById[reply.id];
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
   const remainingLabel = formatRemainingLabel(getEditRemainingMs(reply.created_at));
@@ -183,6 +187,26 @@ function ReplyItem({
           {renderTextWithLinks(reply.content)}
         </div>
       )}
+      {replyScores ? (
+        <div className="mt-1 rounded-md border border-gray-100 bg-white p-2 text-xs text-gray-600">
+          <div className="font-medium text-gray-700">攻撃性判定（テスト表示中）</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
+              (key) => (
+                <span
+                  key={key}
+                  className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
+                >
+                  {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
+                  {typeof replyScores[key] === "number"
+                    ? replyScores[key]!.toFixed(3)
+                    : "未測定"}
+                </span>
+              )
+            )}
+          </div>
+        </div>
+      ) : null}
       {kids.length > 0 ? (
         <ul className="mt-2 space-y-2">
           {kids.map((c) => (
@@ -196,6 +220,7 @@ function ReplyItem({
               editingReplyId={editingReplyId}
               editReplyDraft={editReplyDraft}
               replyEditSaving={replyEditSaving}
+              replyScoresById={replyScoresById}
               onEditDraftChange={onEditDraftChange}
               onStartEdit={onStartEdit}
               onCancelEdit={onCancelEdit}
@@ -218,6 +243,7 @@ type ThreadProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
+  replyScoresById: Record<number, Record<string, number>>;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
@@ -240,6 +266,7 @@ export function ReplyThread(props: ThreadProps) {
           editingReplyId={props.editingReplyId}
           editReplyDraft={props.editReplyDraft}
           replyEditSaving={props.replyEditSaving}
+          replyScoresById={props.replyScoresById}
           onEditDraftChange={props.onEditDraftChange}
           onStartEdit={props.onStartEdit}
           onCancelEdit={props.onCancelEdit}

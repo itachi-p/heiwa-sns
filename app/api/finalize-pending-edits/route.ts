@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { scoreTextOverallMax } from "@/lib/server/moderation";
+import { analyzeTextModeration } from "@/lib/server/moderation";
 import { POST_EDIT_WINDOW_MS } from "@/lib/post-edit-window";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -28,12 +28,12 @@ export async function GET(req: Request) {
       await admin.from("posts").update({ pending_content: null }).eq("id", p.id);
       continue;
     }
-    const score = await scoreTextOverallMax(next, "perspective");
+    const moderation = await analyzeTextModeration(next, "perspective");
     await admin
       .from("posts")
       .update({
         content: next,
-        moderation_max_score: score,
+        moderation_max_score: moderation.overallMax,
         pending_content: null,
       })
       .eq("id", p.id);
