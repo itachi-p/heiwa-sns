@@ -14,12 +14,15 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
-import type { ModerationTestScores } from "@/lib/moderation-test-scores";
+import { ModerationCompactRow } from "@/components/moderation-compact-row";
+import { normalizePerspectiveScores } from "@/lib/perspective-labels";
+import { parseModerateResponse } from "@/lib/parse-moderate-response";
 import {
-  normalizePerspectiveScores,
-  PERSPECTIVE_ATTRIBUTE_LABEL_JA,
-} from "@/lib/perspective-labels";
-import { fetchTimelineToxicityThreshold } from "@/lib/timeline-threshold";
+  DEFAULT_REPLY_TOXICITY_THRESHOLD,
+  fetchReplyToxicityThreshold,
+  fetchTimelineToxicityThreshold,
+} from "@/lib/timeline-threshold";
+import { OTHER_USERS_VISIBILITY_NOTICE } from "@/lib/visibility-notice";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
 import {
@@ -28,14 +31,6 @@ import {
   getEditRemainingMs,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
-import {
-  loadModerationSnapshotFromStorage,
-  parseModerateResponse,
-  persistModerationSnapshot,
-  PostModerationFixedPortal,
-  PostModerationInline,
-  type PostModerationSnapshot,
-} from "@/components/post-moderation-test-panel";
 
 const supabase = createClient();
 
@@ -46,7 +41,6 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
-  moderation_test_scores?: ModerationTestScores | null;
   /** 表示用（posts には保存せず users から解決） */
   users?: {
     nickname: string | null;
@@ -57,7 +51,15 @@ type Post = {
 
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 const RELATION_PENALTY_WINDOW_DAYS = 14;
-const HIGH_RISK_NOTICE_SCORE = 0.9;
+
+/** テスト用5指標（DBには保存しない。同一ブラウザでの校正用） */
+const POST_DEV_SCORES_KEY = "heiwa_post_dev_five_scores_v1";
+const REPLY_DEV_SCORES_KEY = "heiwa_reply_dev_five_scores_v1";
+
+type DevFiveScores = {
+  first?: Record<string, number>;
+  second?: Record<string, number>;
+};
 
 function resolveVisibleContent(
   content: string,
@@ -79,7 +81,7 @@ type PostReply = {
   pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
-  moderation_test_scores?: ModerationTestScores | null;
+  moderation_max_score?: number;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -108,14 +110,6 @@ function renderTextWithLinks(text: string) {
   });
 }
 
-function renderPostScores(scores: Record<string, number> | null | undefined) {
-  const keys = ["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"];
-  return keys.map((key) => ({
-    key,
-    label: PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key,
-    value: typeof scores?.[key] === "number" ? scores[key]!.toFixed(3) : "未測定",
-  }));
-}
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -129,6 +123,17 @@ export default function Home() {
   >(null);
   const [timelineToxicityThreshold, setTimelineToxicityThreshold] =
     useState(0.7);
+  /** リプ欄の閲覧しきい値（既定 0.5。users.reply_toxicity_threshold） */
+  const [replyToxicityThreshold, setReplyToxicityThreshold] = useState(
+    DEFAULT_REPLY_TOXICITY_THRESHOLD
+  );
+  /** 5指標テスト表示（画面用のみ・localStorage） */
+  const [postScoresById, setPostScoresById] = useState<
+    Record<number, DevFiveScores>
+  >({});
+  const [replyScoresById, setReplyScoresById] = useState<
+    Record<number, DevFiveScores>
+  >({});
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
@@ -137,9 +142,6 @@ export default function Home() {
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
-  );
-  const [moderation, setModeration] = useState<PostModerationSnapshot | null>(
-    null
   );
   const [moderationMode, setModerationMode] = useState<
     "mock" | "perspective"
@@ -187,9 +189,56 @@ export default function Home() {
   }, [needsNickname]);
 
   useEffect(() => {
-    const s = loadModerationSnapshotFromStorage();
-    if (s) setModeration(s);
+    if (typeof window === "undefined") return;
+    try {
+      const rawP = window.localStorage.getItem(POST_DEV_SCORES_KEY);
+      if (rawP) {
+        const parsed = JSON.parse(rawP) as Record<string, DevFiveScores>;
+        const next: Record<number, DevFiveScores> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const id = Number(k);
+          if (!Number.isFinite(id) || !v?.first) continue;
+          next[id] = {
+            first: v.first,
+            ...(v.second ? { second: v.second } : {}),
+          };
+        }
+        setPostScoresById(next);
+      }
+      const rawR = window.localStorage.getItem(REPLY_DEV_SCORES_KEY);
+      if (rawR) {
+        const parsed = JSON.parse(rawR) as Record<string, DevFiveScores>;
+        const next: Record<number, DevFiveScores> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const id = Number(k);
+          if (!Number.isFinite(id) || !v?.first) continue;
+          next[id] = {
+            first: v.first,
+            ...(v.second ? { second: v.second } : {}),
+          };
+        }
+        setReplyScoresById(next);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      POST_DEV_SCORES_KEY,
+      JSON.stringify(postScoresById)
+    );
+  }, [postScoresById]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      REPLY_DEV_SCORES_KEY,
+      JSON.stringify(replyScoresById)
+    );
+  }, [replyScoresById]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
@@ -492,6 +541,9 @@ export default function Home() {
       setTimelineToxicityThreshold(
         await fetchTimelineToxicityThreshold(supabase, userId)
       );
+      setReplyToxicityThreshold(
+        await fetchReplyToxicityThreshold(supabase, userId)
+      );
       setProfileReady(true);
     })();
   }, [userId, user]);
@@ -541,6 +593,7 @@ export default function Home() {
     setProfilePlaceholderHex(null);
     setProfileReady(false);
     setTimelineToxicityThreshold(0.7);
+    setReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
     setNicknameDraft("");
     void fetchPosts();
   };
@@ -662,17 +715,15 @@ export default function Home() {
         user_id: string;
         content: string;
         parent_reply_id?: number;
-        moderation_test_scores?: ModerationTestScores;
+        moderation_max_score: number;
       } = {
         post_id: postId,
         user_id: userId,
         content,
+        moderation_max_score: overallMax,
       };
       if (parentReplyId != null) {
         insertRow.parent_reply_id = parentReplyId;
-      }
-      if (Object.keys(scores).length > 0) {
-        insertRow.moderation_test_scores = { first: scores };
       }
 
       const { data: insertedReply, error } = await supabase
@@ -684,6 +735,13 @@ export default function Home() {
       if (error) {
         setErrorMessage(error.message);
         return;
+      }
+
+      if (insertedReply && Object.keys(scores).length > 0) {
+        setReplyScoresById((prev) => ({
+          ...prev,
+          [insertedReply.id]: { first: scores },
+        }));
       }
 
       const targetUserId =
@@ -712,10 +770,8 @@ export default function Home() {
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
-      if (overallMax >= HIGH_RISK_NOTICE_SCORE) {
-        setNoticeMessage(
-          "この返信は、他の方には表示されにくい可能性があります。"
-        );
+      if (overallMax >= replyToxicityThreshold) {
+        setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
       }
       await fetchPosts();
     } catch (err) {
@@ -864,8 +920,6 @@ export default function Home() {
       }
       const snap = parseModerateResponse(json);
       if (snap) {
-        setModeration(snap);
-        persistModerationSnapshot(snap);
         postOverallMax = snap.overallMax;
       } else if (typeof json?.overallMax === "number") {
         postOverallMax = json.overallMax;
@@ -882,10 +936,6 @@ export default function Home() {
         content,
         user_id: userId,
         moderation_max_score: postOverallMax,
-        moderation_test_scores:
-          Object.keys(postScores).length > 0
-            ? { first: postScores }
-            : null,
       })
       .select()
       .single();
@@ -897,10 +947,16 @@ export default function Home() {
     }
 
     if (data) {
+      if (Object.keys(postScores).length > 0) {
+        setPostScoresById((prev) => ({
+          ...prev,
+          [data.id]: { first: postScores },
+        }));
+      }
       setInput("");
       setComposeOpen(false);
-      if (postOverallMax >= HIGH_RISK_NOTICE_SCORE) {
-        setNoticeMessage("この投稿は、他の方には表示されにくい可能性があります。");
+      if (postOverallMax >= timelineToxicityThreshold) {
+        setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
       } else {
         setNoticeMessage(null);
       }
@@ -1091,7 +1147,6 @@ export default function Home() {
                       </div>
                     </div>
                   </details>
-                  <PostModerationInline snapshot={moderation} />
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -1245,42 +1300,15 @@ export default function Home() {
                       {renderTextWithLinks(post.content)}
                     </div>
                   )}
-                  {post.moderation_test_scores?.first ? (
-                    <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
-                      <div className="font-medium text-gray-700">
-                        攻撃性判定（テスト表示中）
-                      </div>
-                      <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        {renderPostScores(post.moderation_test_scores?.first).map(
-                          (item) => (
-                          <span
-                            key={item.key}
-                            className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                          >
-                            {item.label}: {item.value}
-                          </span>
-                          )
-                        )}
-                      </div>
-                      {post.moderation_test_scores?.final ? (
-                        <>
-                          <div className="mt-2 text-[11px] text-gray-500">
-                            編集確定（15分時点）
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1.5">
-                            {renderPostScores(
-                              post.moderation_test_scores?.final
-                            ).map((item) => (
-                              <span
-                                key={`final-${item.key}`}
-                                className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                              >
-                                {item.label}: {item.value}
-                              </span>
-                            ))}
-                          </div>
-                        </>
+                  {postScoresById[post.id]?.first ? (
+                    <div className="mt-1 space-y-1 rounded border border-gray-100 bg-gray-50/80 px-2 py-1">
+                      <ModerationCompactRow
+                        scores={postScoresById[post.id]!.first!}
+                      />
+                      {postScoresById[post.id]?.second ? (
+                        <ModerationCompactRow
+                          scores={postScoresById[post.id]!.second!}
+                        />
                       ) : null}
                     </div>
                   ) : null}
@@ -1364,6 +1392,12 @@ export default function Home() {
                             editingReplyId={editingReplyId}
                             editReplyDraft={editReplyDraft}
                             replyEditSaving={replyEditSaving}
+                            replyVisibilityThreshold={
+                              userId
+                                ? replyToxicityThreshold
+                                : DEFAULT_REPLY_TOXICITY_THRESHOLD
+                            }
+                            replyScoresById={replyScoresById}
                             onEditDraftChange={setEditReplyDraft}
                             onStartEdit={(r) => {
                               setEditingReplyId(r.id);
@@ -1484,10 +1518,6 @@ export default function Home() {
         errorMessage={nicknameModalError}
       />
 
-      <PostModerationFixedPortal
-        visible={Boolean(canInteract && moderation && !composeOpen)}
-        snapshot={moderation}
-      />
     </main>
   );
 }

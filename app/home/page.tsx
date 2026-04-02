@@ -8,7 +8,12 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
-import { fetchTimelineToxicityThreshold } from "@/lib/timeline-threshold";
+import {
+  DEFAULT_REPLY_TOXICITY_THRESHOLD,
+  fetchReplyToxicityThreshold,
+  fetchTimelineToxicityThreshold,
+} from "@/lib/timeline-threshold";
+import { OTHER_USERS_VISIBILITY_NOTICE } from "@/lib/visibility-notice";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import {
   filterPresetRows,
@@ -25,25 +30,21 @@ import {
   formatRemainingLabel,
   getEditRemainingMs,
 } from "@/lib/post-edit-window";
+import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
-import type { ModerationTestScores } from "@/lib/moderation-test-scores";
-import {
-  normalizePerspectiveScores,
-  PERSPECTIVE_ATTRIBUTE_LABEL_JA,
-} from "@/lib/perspective-labels";
-import {
-  loadModerationSnapshotFromStorage,
-  parseModerateResponse,
-  persistModerationSnapshot,
-  PostModerationFixedPortal,
-  PostModerationInline,
-  type PostModerationSnapshot,
-} from "@/components/post-moderation-test-panel";
+import { normalizePerspectiveScores } from "@/lib/perspective-labels";
+import { parseModerateResponse } from "@/lib/parse-moderate-response";
 
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
 const RELATION_PENALTY_MIN_SCORE = 0.2;
-const HIGH_RISK_NOTICE_SCORE = 0.9;
+
+const POST_DEV_SCORES_KEY = "heiwa_post_dev_five_scores_v1";
+const REPLY_DEV_SCORES_KEY = "heiwa_reply_dev_five_scores_v1";
+type DevFiveScores = {
+  first?: Record<string, number>;
+  second?: Record<string, number>;
+};
 
 type Post = {
   id: number;
@@ -52,7 +53,6 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
-  moderation_test_scores?: ModerationTestScores | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -68,7 +68,7 @@ type PostReply = {
   pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
-  moderation_test_scores?: ModerationTestScores | null;
+  moderation_max_score?: number;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -109,14 +109,6 @@ function renderTextWithLinks(text: string) {
   });
 }
 
-function renderPostScores(scores: Record<string, number> | null | undefined) {
-  const keys = ["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"];
-  return keys.map((key) => ({
-    key,
-    label: PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key,
-    value: typeof scores?.[key] === "number" ? scores[key]!.toFixed(3) : "未測定",
-  }));
-}
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -129,6 +121,14 @@ export default function HomePage() {
   const [profileBio, setProfileBio] = useState("");
   const [profileTimelineToxicityThreshold, setProfileTimelineToxicityThreshold] =
     useState(0.7);
+  const [profileReplyToxicityThreshold, setProfileReplyToxicityThreshold] =
+    useState(DEFAULT_REPLY_TOXICITY_THRESHOLD);
+  const [postScoresById, setPostScoresById] = useState<
+    Record<number, DevFiveScores>
+  >({});
+  const [replyScoresById, setReplyScoresById] = useState<
+    Record<number, DevFiveScores>
+  >({});
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
   const [timelineThresholdDraft, setTimelineThresholdDraft] = useState("0.7");
@@ -169,9 +169,6 @@ export default function HomePage() {
   );
   const [blockOnSubmit, setBlockOnSubmit] = useState(true);
   const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);
-  /** 本投稿の直近 AI 判定（/ と同様にテスト表示） */
-  const [postModeration, setPostModeration] =
-    useState<PostModerationSnapshot | null>(null);
   const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
     string | null
   >(null);
@@ -198,9 +195,56 @@ export default function HomePage() {
   }, [needsNickname]);
 
   useEffect(() => {
-    const s = loadModerationSnapshotFromStorage();
-    if (s) setPostModeration(s);
+    if (typeof window === "undefined") return;
+    try {
+      const rawP = window.localStorage.getItem(POST_DEV_SCORES_KEY);
+      if (rawP) {
+        const parsed = JSON.parse(rawP) as Record<string, DevFiveScores>;
+        const next: Record<number, DevFiveScores> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const id = Number(k);
+          if (!Number.isFinite(id) || !v?.first) continue;
+          next[id] = {
+            first: v.first,
+            ...(v.second ? { second: v.second } : {}),
+          };
+        }
+        setPostScoresById(next);
+      }
+      const rawR = window.localStorage.getItem(REPLY_DEV_SCORES_KEY);
+      if (rawR) {
+        const parsed = JSON.parse(rawR) as Record<string, DevFiveScores>;
+        const next: Record<number, DevFiveScores> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          const id = Number(k);
+          if (!Number.isFinite(id) || !v?.first) continue;
+          next[id] = {
+            first: v.first,
+            ...(v.second ? { second: v.second } : {}),
+          };
+        }
+        setReplyScoresById(next);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      POST_DEV_SCORES_KEY,
+      JSON.stringify(postScoresById)
+    );
+  }, [postScoresById]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      REPLY_DEV_SCORES_KEY,
+      JSON.stringify(replyScoresById)
+    );
+  }, [replyScoresById]);
 
   const joinedAtLabel =
     user?.created_at != null
@@ -261,6 +305,7 @@ export default function HomePage() {
     }
 
     const threshold = await fetchTimelineToxicityThreshold(supabase, uid);
+    const replyThreshold = await fetchReplyToxicityThreshold(supabase, uid);
 
     // プリセットだけでなく、誰かが登録した is_preset=false も共有マスタなので検索対象に含める
     const catalogRes = await supabase
@@ -394,6 +439,7 @@ export default function HomePage() {
     setProfilePlaceholderHex(placeholderHex);
     setProfileBio(bio);
     setProfileTimelineToxicityThreshold(threshold);
+    setProfileReplyToxicityThreshold(replyThreshold);
     setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
@@ -463,6 +509,7 @@ export default function HomePage() {
       setReplyParentReplyId(null);
       setEditingReplyId(null);
       setProfileTimelineToxicityThreshold(0.7);
+      setProfileReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
       setTimelineThresholdDraft("0.7");
       return;
     }
@@ -504,6 +551,7 @@ export default function HomePage() {
     setReplyParentReplyId(null);
     setEditingReplyId(null);
     setProfileTimelineToxicityThreshold(0.7);
+    setProfileReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
     setTimelineThresholdDraft("0.7");
   };
 
@@ -620,17 +668,15 @@ export default function HomePage() {
         user_id: string;
         content: string;
         parent_reply_id?: number;
-        moderation_test_scores?: ModerationTestScores;
+        moderation_max_score: number;
       } = {
         post_id: postId,
         user_id: userId,
         content,
+        moderation_max_score: overallMax,
       };
       if (parentReplyId != null) {
         insertRow.parent_reply_id = parentReplyId;
-      }
-      if (Object.keys(scores).length > 0) {
-        insertRow.moderation_test_scores = { first: scores };
       }
 
       const { data: insertedReply, error } = await supabase
@@ -642,6 +688,13 @@ export default function HomePage() {
       if (error) {
         setErrorMessage(error.message);
         return;
+      }
+
+      if (insertedReply && Object.keys(scores).length > 0) {
+        setReplyScoresById((prev) => ({
+          ...prev,
+          [insertedReply.id]: { first: scores },
+        }));
       }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
@@ -669,10 +722,8 @@ export default function HomePage() {
           console.warn("reply_toxic_events insert failed:", evErr.message);
         }
       }
-      if (overallMax >= HIGH_RISK_NOTICE_SCORE) {
-        setNoticeMessage(
-          "この返信は、他の方には表示されにくい可能性があります。"
-        );
+      if (overallMax >= profileReplyToxicityThreshold) {
+        setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
       }
       await fetchOwnPosts(userId);
     } catch (err) {
@@ -785,8 +836,6 @@ export default function HomePage() {
     }
     const snap = parseModerateResponse(moderationJson);
     if (snap) {
-      setPostModeration(snap);
-      persistModerationSnapshot(snap);
       postOverallMax = snap.overallMax;
     } else if (typeof moderationJson?.overallMax === "number") {
       postOverallMax = moderationJson.overallMax;
@@ -798,8 +847,6 @@ export default function HomePage() {
         content,
         user_id: userId,
         moderation_max_score: postOverallMax,
-        moderation_test_scores:
-          Object.keys(postScores).length > 0 ? { first: postScores } : null,
       })
       .select("id")
       .single();
@@ -810,10 +857,17 @@ export default function HomePage() {
       return;
     }
 
+    if (inserted && Object.keys(postScores).length > 0) {
+      setPostScoresById((prev) => ({
+        ...prev,
+        [inserted.id]: { first: postScores },
+      }));
+    }
+
     setDraft("");
     setComposeOpen(false);
-    if (postOverallMax >= HIGH_RISK_NOTICE_SCORE) {
-      setNoticeMessage("この投稿は、他の方には表示されにくい可能性があります。");
+    if (postOverallMax >= profileTimelineToxicityThreshold) {
+      setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
     } else {
       setNoticeMessage(null);
     }
@@ -1583,7 +1637,6 @@ export default function HomePage() {
                     </div>
                   </div>
                 </details>
-                <PostModerationInline snapshot={postModeration} />
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -1710,42 +1763,15 @@ export default function HomePage() {
                         {renderTextWithLinks(post.content)}
                       </div>
                     )}
-                    {post.moderation_test_scores?.first ? (
-                      <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
-                        <div className="font-medium text-gray-700">
-                          攻撃性判定（テスト表示中）
-                        </div>
-                        <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          {renderPostScores(post.moderation_test_scores?.first).map(
-                            (item) => (
-                            <span
-                              key={item.key}
-                              className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                            >
-                              {item.label}: {item.value}
-                            </span>
-                            )
-                          )}
-                        </div>
-                        {post.moderation_test_scores?.final ? (
-                          <>
-                            <div className="mt-2 text-[11px] text-gray-500">
-                              編集確定（15分時点）
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-1.5">
-                              {renderPostScores(
-                                post.moderation_test_scores?.final
-                              ).map((item) => (
-                                <span
-                                  key={`final-${item.key}`}
-                                  className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                                >
-                                  {item.label}: {item.value}
-                                </span>
-                              ))}
-                            </div>
-                          </>
+                    {postScoresById[post.id]?.first ? (
+                      <div className="mt-1 space-y-1 rounded border border-gray-100 bg-gray-50/80 px-2 py-1">
+                        <ModerationCompactRow
+                          scores={postScoresById[post.id]!.first!}
+                        />
+                        {postScoresById[post.id]?.second ? (
+                          <ModerationCompactRow
+                            scores={postScoresById[post.id]!.second!}
+                          />
                         ) : null}
                       </div>
                     ) : null}
@@ -1790,6 +1816,12 @@ export default function HomePage() {
                               editingReplyId={editingReplyId}
                               editReplyDraft={editReplyDraft}
                               replyEditSaving={replyEditSaving}
+                              replyVisibilityThreshold={
+                                userId
+                                  ? profileReplyToxicityThreshold
+                                  : DEFAULT_REPLY_TOXICITY_THRESHOLD
+                              }
+                              replyScoresById={replyScoresById}
                               onEditDraftChange={setEditReplyDraft}
                               onStartEdit={(r) => {
                                 setEditingReplyId(r.id);
@@ -1889,16 +1921,6 @@ export default function HomePage() {
         errorMessage={nicknameModalError}
       />
 
-      <PostModerationFixedPortal
-        visible={Boolean(
-          userId &&
-            profileReady &&
-            !needsNickname &&
-            postModeration &&
-            !composeOpen
-        )}
-        snapshot={postModeration}
-      />
     </main>
     {interestConfirm ? (
       <div
