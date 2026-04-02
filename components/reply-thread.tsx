@@ -3,7 +3,12 @@
 import Link from "next/link";
 import React from "react";
 import { UserAvatar } from "@/components/user-avatar";
-import { PERSPECTIVE_ATTRIBUTE_LABEL_JA } from "@/lib/perspective-labels";
+import {
+  PERSPECTIVE_ATTRIBUTE_LABEL_JA,
+  REPLY_THREAD_HIDE_THRESHOLD,
+} from "@/lib/perspective-labels";
+import type { ModerationTestScores } from "@/lib/moderation-test-scores";
+import { maxPerspectiveScore } from "@/lib/moderation-test-scores";
 import {
   canEditOwnReply,
   formatRemainingLabel,
@@ -18,6 +23,7 @@ export type PostReplyRow = {
   pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
+  moderation_test_scores?: ModerationTestScores | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -55,13 +61,6 @@ type ItemProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
-  replyScoresById: Record<
-    number,
-    {
-      first?: Record<string, number>;
-      second?: Record<string, number>;
-    }
-  >;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
@@ -79,7 +78,6 @@ function ReplyItem({
   editingReplyId,
   editReplyDraft,
   replyEditSaving,
-  replyScoresById,
   onEditDraftChange,
   onStartEdit,
   onCancelEdit,
@@ -87,10 +85,18 @@ function ReplyItem({
   onDelete,
   onReplyToReply,
 }: ItemProps) {
-  const replyScores = replyScoresById[reply.id];
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
   const remainingLabel = formatRemainingLabel(getEditRemainingMs(reply.created_at));
+
+  const isAuthor = userId != null && userId === reply.user_id;
+  const firstMax = maxPerspectiveScore(reply.moderation_test_scores?.first);
+  const hideReplyBody =
+    !isAuthor && firstMax >= REPLY_THREAD_HIDE_THRESHOLD;
+
+  const scores = reply.moderation_test_scores;
+  const showModerationPanel =
+    !hideReplyBody && (scores?.first || scores?.final);
 
   return (
     <li
@@ -188,31 +194,39 @@ function ReplyItem({
             </button>
           </div>
         </div>
+      ) : hideReplyBody ? (
+        <p className="mt-1 text-sm italic text-gray-500">
+          この返信は、攻撃性の可能性があるため表示を控えています。
+        </p>
       ) : (
         <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-800">
           {renderTextWithLinks(reply.content)}
         </div>
       )}
-      {replyScores?.first ? (
+      {showModerationPanel ? (
         <div className="mt-1 rounded-md border border-gray-100 bg-white p-2 text-xs text-gray-600">
           <div className="font-medium text-gray-700">攻撃性判定（テスト表示中）</div>
-          <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
-          <div className="mt-1 flex flex-wrap gap-1.5">
-            {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
-              (key) => (
-                <span
-                  key={key}
-                  className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
-                >
-                  {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
-                  {typeof replyScores.first?.[key] === "number"
-                    ? replyScores.first[key]!.toFixed(3)
-                    : "未測定"}
-                </span>
-              )
-            )}
-          </div>
-          {replyScores.second ? (
+          {scores?.first ? (
+            <>
+              <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
+                  (key) => (
+                    <span
+                      key={key}
+                      className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
+                    >
+                      {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
+                      {typeof scores.first?.[key] === "number"
+                        ? scores.first[key]!.toFixed(3)
+                        : "未測定"}
+                    </span>
+                  )
+                )}
+              </div>
+            </>
+          ) : null}
+          {scores?.final ? (
             <>
               <div className="mt-2 text-[11px] text-gray-500">
                 編集確定（15分時点）
@@ -221,12 +235,12 @@ function ReplyItem({
                 {["TOXICITY", "SEVERE_TOXICITY", "INSULT", "PROFANITY", "THREAT"].map(
                   (key) => (
                     <span
-                      key={`second-${key}`}
+                      key={`final-${key}`}
                       className="rounded bg-gray-50 px-2 py-0.5 ring-1 ring-gray-200"
                     >
                       {PERSPECTIVE_ATTRIBUTE_LABEL_JA[key] ?? key}:{" "}
-                      {typeof replyScores.second?.[key] === "number"
-                        ? replyScores.second[key]!.toFixed(3)
+                      {typeof scores.final?.[key] === "number"
+                        ? scores.final[key]!.toFixed(3)
                         : "未測定"}
                     </span>
                   )
@@ -249,7 +263,6 @@ function ReplyItem({
               editingReplyId={editingReplyId}
               editReplyDraft={editReplyDraft}
               replyEditSaving={replyEditSaving}
-              replyScoresById={replyScoresById}
               onEditDraftChange={onEditDraftChange}
               onStartEdit={onStartEdit}
               onCancelEdit={onCancelEdit}
@@ -272,13 +285,6 @@ type ThreadProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
-  replyScoresById: Record<
-    number,
-    {
-      first?: Record<string, number>;
-      second?: Record<string, number>;
-    }
-  >;
   onEditDraftChange: (v: string) => void;
   onStartEdit: (r: PostReplyRow) => void;
   onCancelEdit: () => void;
@@ -301,7 +307,6 @@ export function ReplyThread(props: ThreadProps) {
           editingReplyId={props.editingReplyId}
           editReplyDraft={props.editReplyDraft}
           replyEditSaving={props.replyEditSaving}
-          replyScoresById={props.replyScoresById}
           onEditDraftChange={props.onEditDraftChange}
           onStartEdit={props.onStartEdit}
           onCancelEdit={props.onCancelEdit}

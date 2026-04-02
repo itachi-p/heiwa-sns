@@ -15,7 +15,7 @@ export async function GET(req: Request) {
 
   const { data: posts, error: postsError } = await admin
     .from("posts")
-    .select("id, pending_content")
+    .select("id, pending_content, moderation_test_scores")
     .lte("created_at", cutoff)
     .not("pending_content", "is", null);
   if (postsError) {
@@ -29,11 +29,18 @@ export async function GET(req: Request) {
       continue;
     }
     const moderation = await analyzeTextModeration(next, "perspective");
+    const existingScores =
+      (p as { moderation_test_scores?: Record<string, unknown> | null })
+        .moderation_test_scores ?? {};
     await admin
       .from("posts")
       .update({
         content: next,
         moderation_max_score: moderation.overallMax,
+        moderation_test_scores: {
+          ...existingScores,
+          final: moderation.scores,
+        },
         pending_content: null,
       })
       .eq("id", p.id);
@@ -41,7 +48,7 @@ export async function GET(req: Request) {
 
   const { data: replies, error: repliesError } = await admin
     .from("post_replies")
-    .select("id, pending_content")
+    .select("id, pending_content, moderation_test_scores")
     .lte("created_at", cutoff)
     .not("pending_content", "is", null);
   if (repliesError) {
@@ -54,10 +61,18 @@ export async function GET(req: Request) {
       await admin.from("post_replies").update({ pending_content: null }).eq("id", r.id);
       continue;
     }
+    const moderation = await analyzeTextModeration(next, "perspective");
+    const existingScores =
+      (r as { moderation_test_scores?: Record<string, unknown> | null })
+        .moderation_test_scores ?? {};
     await admin
       .from("post_replies")
       .update({
         content: next,
+        moderation_test_scores: {
+          ...existingScores,
+          final: moderation.scores,
+        },
         pending_content: null,
       })
       .eq("id", r.id);

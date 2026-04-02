@@ -26,11 +26,10 @@ import {
   getEditRemainingMs,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
+import type { ModerationTestScores } from "@/lib/moderation-test-scores";
 import {
-  buildReplyPerspectiveBlockMessage,
   normalizePerspectiveScores,
   PERSPECTIVE_ATTRIBUTE_LABEL_JA,
-  REPLY_PERSPECTIVE_BLOCK_THRESHOLD,
 } from "@/lib/perspective-labels";
 import {
   loadModerationSnapshotFromStorage,
@@ -53,6 +52,7 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
+  moderation_test_scores?: ModerationTestScores | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -68,6 +68,7 @@ type PostReply = {
   pending_content?: string | null;
   created_at?: string;
   parent_reply_id?: number | null;
+  moderation_test_scores?: ModerationTestScores | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -116,14 +117,6 @@ function renderPostScores(scores: Record<string, number> | null | undefined) {
     value: typeof scores?.[key] === "number" ? scores[key]!.toFixed(3) : "未測定",
   }));
 }
-type ScoreStages = {
-  first?: Record<string, number>;
-  second?: Record<string, number>;
-};
-
-const POST_SCORE_STORE_KEY = "heiwa_post_scores_by_id";
-const REPLY_SCORE_STORE_KEY = "heiwa_reply_scores_by_id";
-
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -192,28 +185,8 @@ export default function HomePage() {
   const [replyComposerPostId, setReplyComposerPostId] = useState<number | null>(
     null
   );
-  const [replyModerationByPostId, setReplyModerationByPostId] = useState<
-    Record<
-      number,
-      | {
-          mode: string;
-          overallMax: number;
-          scores: Record<string, number>;
-        }
-      | null
-    >
-  >({});
-  const [replyBlockMessageByPostId, setReplyBlockMessageByPostId] = useState<
-    Record<number, string | null>
-  >({});
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [interestPlusPending, setInterestPlusPending] = useState(false);
-  const [postScoresById, setPostScoresById] = useState<
-    Record<number, ScoreStages>
-  >({});
-  const [replyScoresById, setReplyScoresById] = useState<
-    Record<number, ScoreStages>
-  >({});
   const profileEditOpenRef = useRef(false);
 
   const userId = user?.id ?? null;
@@ -228,76 +201,6 @@ export default function HomePage() {
     const s = loadModerationSnapshotFromStorage();
     if (s) setPostModeration(s);
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(POST_SCORE_STORE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const next: Record<number, ScoreStages> = {};
-      for (const [k, v] of Object.entries(parsed)) {
-        const id = Number(k);
-        if (!Number.isFinite(id) || !v || typeof v !== "object") continue;
-        const obj = v as { first?: unknown; second?: unknown };
-        const first =
-          obj.first && typeof obj.first === "object"
-            ? (obj.first as Record<string, number>)
-            : (v as Record<string, number>);
-        const second =
-          obj.second && typeof obj.second === "object"
-            ? (obj.second as Record<string, number>)
-            : undefined;
-        next[id] = { first, second };
-      }
-      setPostScoresById(next);
-    } catch {
-      // ignore malformed local cache
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(REPLY_SCORE_STORE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const next: Record<number, ScoreStages> = {};
-      for (const [k, v] of Object.entries(parsed)) {
-        const id = Number(k);
-        if (!Number.isFinite(id) || !v || typeof v !== "object") continue;
-        const obj = v as { first?: unknown; second?: unknown };
-        const first =
-          obj.first && typeof obj.first === "object"
-            ? (obj.first as Record<string, number>)
-            : (v as Record<string, number>);
-        const second =
-          obj.second && typeof obj.second === "object"
-            ? (obj.second as Record<string, number>)
-            : undefined;
-        next[id] = { first, second };
-      }
-      setReplyScoresById(next);
-    } catch {
-      // ignore malformed local cache
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      POST_SCORE_STORE_KEY,
-      JSON.stringify(postScoresById)
-    );
-  }, [postScoresById]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      REPLY_SCORE_STORE_KEY,
-      JSON.stringify(replyScoresById)
-    );
-  }, [replyScoresById]);
 
   const joinedAtLabel =
     user?.created_at != null
@@ -556,8 +459,6 @@ export default function HomePage() {
       setRepliesByPost({});
       setReplyDrafts({});
       setReplyComposerPostId(null);
-      setReplyModerationByPostId({});
-      setReplyBlockMessageByPostId({});
       setEditingPostId(null);
       setReplyParentReplyId(null);
       setEditingReplyId(null);
@@ -599,8 +500,6 @@ export default function HomePage() {
     setRepliesByPost({});
     setReplyDrafts({});
     setReplyComposerPostId(null);
-    setReplyModerationByPostId({});
-    setReplyBlockMessageByPostId({});
     setEditingPostId(null);
     setReplyParentReplyId(null);
     setEditingReplyId(null);
@@ -650,28 +549,6 @@ export default function HomePage() {
       return;
     }
     setEditingPostId(null);
-    try {
-      const res = await fetch("/api/moderate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: content, mode: moderationMode }),
-      });
-      const json = (await res.json().catch(() => null)) as
-        | { paragraphs?: Array<{ scores?: Record<string, unknown> }> }
-        | null;
-      const second = normalizePerspectiveScores(
-        (json?.paragraphs?.[0]?.scores as Record<string, unknown> | undefined) ??
-          {}
-      );
-      if (Object.keys(second).length > 0) {
-        setPostScoresById((prev) => ({
-          ...prev,
-          [postId]: { ...(prev[postId] ?? {}), second },
-        }));
-      }
-    } catch {
-      // keep edit save successful even if test scoring failed
-    }
     setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchOwnPosts(userId);
   };
@@ -696,7 +573,6 @@ export default function HomePage() {
 
     setReplySubmittingPostId(postId);
     setErrorMessage(null);
-    setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
 
     try {
       const res = await fetch("/api/moderate", {
@@ -722,7 +598,6 @@ export default function HomePage() {
       };
       if (!res.ok) {
         setErrorMessage(json?.error ?? "AI判定に失敗しました。");
-        setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
         return;
       }
       if (json.degraded) {
@@ -740,34 +615,12 @@ export default function HomePage() {
       const overallMax =
         typeof json.overallMax === "number" ? json.overallMax : 0;
 
-      setReplyModerationByPostId((prev) => ({
-        ...prev,
-        [postId]: {
-          mode: json.mode ?? moderationMode,
-          overallMax,
-          scores,
-        },
-      }));
-
-      if (overallMax > REPLY_PERSPECTIVE_BLOCK_THRESHOLD) {
-        setReplyBlockMessageByPostId((prev) => ({
-          ...prev,
-          [postId]: buildReplyPerspectiveBlockMessage(
-            overallMax,
-            scores,
-            REPLY_PERSPECTIVE_BLOCK_THRESHOLD
-          ),
-        }));
-        return;
-      }
-
-      setReplyBlockMessageByPostId((prev) => ({ ...prev, [postId]: null }));
-
       const insertRow: {
         post_id: number;
         user_id: string;
         content: string;
         parent_reply_id?: number;
+        moderation_test_scores?: ModerationTestScores;
       } = {
         post_id: postId,
         user_id: userId,
@@ -775,6 +628,9 @@ export default function HomePage() {
       };
       if (parentReplyId != null) {
         insertRow.parent_reply_id = parentReplyId;
+      }
+      if (Object.keys(scores).length > 0) {
+        insertRow.moderation_test_scores = { first: scores };
       }
 
       const { data: insertedReply, error } = await supabase
@@ -787,12 +643,6 @@ export default function HomePage() {
         setErrorMessage(error.message);
         return;
       }
-      if (insertedReply && Object.keys(scores).length > 0) {
-        setReplyScoresById((prev) => ({
-          ...prev,
-          [insertedReply.id]: { first: scores },
-        }));
-      }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
@@ -804,8 +654,7 @@ export default function HomePage() {
         insertedReply &&
         targetUserId &&
         targetUserId !== userId &&
-        overallMax > RELATION_PENALTY_MIN_SCORE &&
-        overallMax < REPLY_PERSPECTIVE_BLOCK_THRESHOLD
+        overallMax > RELATION_PENALTY_MIN_SCORE
       ) {
         const { error: evErr } = await supabase
           .from("reply_toxic_events")
@@ -820,11 +669,15 @@ export default function HomePage() {
           console.warn("reply_toxic_events insert failed:", evErr.message);
         }
       }
+      if (overallMax >= HIGH_RISK_NOTICE_SCORE) {
+        setNoticeMessage(
+          "この返信は、他の方には表示されにくい可能性があります。"
+        );
+      }
       await fetchOwnPosts(userId);
     } catch (err) {
       console.error("reply moderation error:", err);
       setErrorMessage("AI判定に失敗しました。");
-      setReplyModerationByPostId((prev) => ({ ...prev, [postId]: null }));
     } finally {
       setReplySubmittingPostId(null);
     }
@@ -867,28 +720,6 @@ export default function HomePage() {
       return;
     }
     setEditingReplyId(null);
-    try {
-      const res = await fetch("/api/moderate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: content, mode: moderationMode }),
-      });
-      const json = (await res.json().catch(() => null)) as
-        | { paragraphs?: Array<{ scores?: Record<string, unknown> }> }
-        | null;
-      const second = normalizePerspectiveScores(
-        (json?.paragraphs?.[0]?.scores as Record<string, unknown> | undefined) ??
-          {}
-      );
-      if (Object.keys(second).length > 0) {
-        setReplyScoresById((prev) => ({
-          ...prev,
-          [replyId]: { ...(prev[replyId] ?? {}), second },
-        }));
-      }
-    } catch {
-      // keep edit save successful even if test scoring failed
-    }
     setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
     await fetchOwnPosts(userId);
   };
@@ -944,16 +775,19 @@ export default function HomePage() {
       return;
     }
 
+    const rawScores = normalizePerspectiveScores(
+      moderationJson?.paragraphs?.[0]?.scores as
+        | Record<string, unknown>
+        | undefined
+    );
+    if (Object.keys(rawScores).length > 0) {
+      postScores = rawScores;
+    }
     const snap = parseModerateResponse(moderationJson);
     if (snap) {
       setPostModeration(snap);
       persistModerationSnapshot(snap);
       postOverallMax = snap.overallMax;
-      postScores = normalizePerspectiveScores(
-        (moderationJson?.paragraphs?.[0]?.scores as
-          | Record<string, unknown>
-          | undefined) ?? {}
-      );
     } else if (typeof moderationJson?.overallMax === "number") {
       postOverallMax = moderationJson.overallMax;
     }
@@ -964,6 +798,8 @@ export default function HomePage() {
         content,
         user_id: userId,
         moderation_max_score: postOverallMax,
+        moderation_test_scores:
+          Object.keys(postScores).length > 0 ? { first: postScores } : null,
       })
       .select("id")
       .single();
@@ -976,12 +812,6 @@ export default function HomePage() {
 
     setDraft("");
     setComposeOpen(false);
-    if (inserted && Object.keys(postScores).length > 0) {
-      setPostScoresById((prev) => ({
-        ...prev,
-        [inserted.id]: { first: postScores },
-      }));
-    }
     if (postOverallMax >= HIGH_RISK_NOTICE_SCORE) {
       setNoticeMessage("この投稿は、他の方には表示されにくい可能性があります。");
     } else {
@@ -1880,38 +1710,40 @@ export default function HomePage() {
                         {renderTextWithLinks(post.content)}
                       </div>
                     )}
-                    {postScoresById[post.id]?.first ? (
+                    {post.moderation_test_scores?.first ? (
                       <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 p-2 text-xs text-gray-600">
                         <div className="font-medium text-gray-700">
                           攻撃性判定（テスト表示中）
                         </div>
                         <div className="mt-1 text-[11px] text-gray-500">初回投稿</div>
                         <div className="mt-1 flex flex-wrap gap-1.5">
-                          {renderPostScores(postScoresById[post.id]?.first).map((item) => (
+                          {renderPostScores(post.moderation_test_scores?.first).map(
+                            (item) => (
                             <span
                               key={item.key}
                               className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
                             >
                               {item.label}: {item.value}
                             </span>
-                          ))}
+                            )
+                          )}
                         </div>
-                        {postScoresById[post.id]?.second ? (
+                        {post.moderation_test_scores?.final ? (
                           <>
                             <div className="mt-2 text-[11px] text-gray-500">
                               編集確定（15分時点）
                             </div>
                             <div className="mt-1 flex flex-wrap gap-1.5">
-                              {renderPostScores(postScoresById[post.id]?.second).map(
-                                (item) => (
-                                  <span
-                                    key={`second-${item.key}`}
-                                    className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                                  >
-                                    {item.label}: {item.value}
-                                  </span>
-                                )
-                              )}
+                              {renderPostScores(
+                                post.moderation_test_scores?.final
+                              ).map((item) => (
+                                <span
+                                  key={`final-${item.key}`}
+                                  className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
+                                >
+                                  {item.label}: {item.value}
+                                </span>
+                              ))}
                             </div>
                           </>
                         ) : null}
@@ -1925,25 +1757,9 @@ export default function HomePage() {
                           if (replyComposerPostId === post.id) {
                             setReplyComposerPostId(null);
                             setReplyParentReplyId(null);
-                            setReplyModerationByPostId((p) => ({
-                              ...p,
-                              [post.id]: null,
-                            }));
-                            setReplyBlockMessageByPostId((p) => ({
-                              ...p,
-                              [post.id]: null,
-                            }));
                           } else {
                             setReplyComposerPostId(post.id);
                             setReplyParentReplyId(null);
-                            setReplyModerationByPostId((p) => ({
-                              ...p,
-                              [post.id]: null,
-                            }));
-                            setReplyBlockMessageByPostId((p) => ({
-                              ...p,
-                              [post.id]: null,
-                            }));
                           }
                         }}
                         className={[
@@ -1974,7 +1790,6 @@ export default function HomePage() {
                               editingReplyId={editingReplyId}
                               editReplyDraft={editReplyDraft}
                               replyEditSaving={replyEditSaving}
-                              replyScoresById={replyScoresById}
                               onEditDraftChange={setEditReplyDraft}
                               onStartEdit={(r) => {
                                 setEditingReplyId(r.id);
@@ -2009,10 +1824,6 @@ export default function HomePage() {
                               ...prev,
                               [post.id]: v,
                             }));
-                            setReplyBlockMessageByPostId((p) => ({
-                              ...p,
-                              [post.id]: null,
-                            }));
                           }}
                           rows={3}
                           maxLength={2000}
@@ -2024,39 +1835,6 @@ export default function HomePage() {
                           autoFocus
                           className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                         />
-                        {replyModerationByPostId[post.id] ? (
-                          <div className="mb-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs">
-                            <div className="font-medium text-gray-800">
-                              返信・AI判定（mode:{" "}
-                              {replyModerationByPostId[post.id]!.mode} / max:{" "}
-                              {replyModerationByPostId[post.id]!.overallMax.toFixed(
-                                3
-                              )}{" "}
-                              / ブロック閾値:{" "}
-                              {REPLY_PERSPECTIVE_BLOCK_THRESHOLD}）
-                            </div>
-                            <div className="mt-1.5 flex flex-wrap gap-1.5 text-gray-700">
-                              {Object.entries(
-                                replyModerationByPostId[post.id]!.scores
-                              )
-                                .sort(([a], [b]) => a.localeCompare(b))
-                                .map(([k, v]) => (
-                                  <span
-                                    key={k}
-                                    className="rounded bg-white px-2 py-0.5 ring-1 ring-gray-200"
-                                  >
-                                    {PERSPECTIVE_ATTRIBUTE_LABEL_JA[k] ?? k}:{" "}
-                                    {Number(v).toFixed(3)}
-                                  </span>
-                                ))}
-                            </div>
-                          </div>
-                        ) : null}
-                        {replyBlockMessageByPostId[post.id]?.trim() ? (
-                          <p className="mb-2 text-sm font-medium leading-snug text-red-600">
-                            {replyBlockMessageByPostId[post.id]}
-                          </p>
-                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <button
                             type="button"
@@ -2074,14 +1852,6 @@ export default function HomePage() {
                             onClick={() => {
                               setReplyComposerPostId(null);
                               setReplyParentReplyId(null);
-                              setReplyModerationByPostId((p) => ({
-                                ...p,
-                                [post.id]: null,
-                              }));
-                              setReplyBlockMessageByPostId((p) => ({
-                                ...p,
-                                [post.id]: null,
-                              }));
                             }}
                             className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
