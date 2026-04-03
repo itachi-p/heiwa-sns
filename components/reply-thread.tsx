@@ -8,6 +8,7 @@ import {
   canEditOwnReply,
   formatRemainingLabel,
   getEditRemainingMs,
+  resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 
 export type PostReplyRow = {
@@ -54,6 +55,7 @@ type ItemProps = {
   childrenByParent: Record<number, PostReplyRow[]>;
   userId: string | null;
   canInteract: boolean;
+  nowTick: number;
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
@@ -77,6 +79,7 @@ function ReplyItem({
   childrenByParent,
   userId,
   canInteract,
+  nowTick,
   editingReplyId,
   editReplyDraft,
   replyEditSaving,
@@ -105,8 +108,6 @@ function ReplyItem({
       Object.keys(replyScores.first).length > 0) ||
     (replyScores?.second &&
       Object.keys(replyScores.second).length > 0);
-  const showModerationPanel = !hideReplyBody && Boolean(hasDevScores);
-
   return (
     <li
       className={[
@@ -209,10 +210,17 @@ function ReplyItem({
         </p>
       ) : (
         <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-800">
-          {renderTextWithLinks(reply.content)}
+          {renderTextWithLinks(
+            resolvePendingVisibleContent(
+              reply.content,
+              reply.pending_content,
+              reply.created_at,
+              nowTick
+            )
+          )}
         </div>
       )}
-      {showModerationPanel ? (
+      {hasDevScores ? (
         <div className="mt-1 space-y-1 rounded border border-gray-100 bg-gray-50/80 px-2 py-1">
           {replyScores?.first &&
           Object.keys(replyScores.first).length > 0 ? (
@@ -234,6 +242,7 @@ function ReplyItem({
               childrenByParent={childrenByParent}
               userId={userId}
               canInteract={canInteract}
+              nowTick={nowTick}
               editingReplyId={editingReplyId}
               editReplyDraft={editReplyDraft}
               replyEditSaving={replyEditSaving}
@@ -258,6 +267,7 @@ type ThreadProps = {
   childrenByParent: Record<number, PostReplyRow[]>;
   userId: string | null;
   canInteract: boolean;
+  nowTick: number;
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
@@ -285,6 +295,7 @@ export function ReplyThread(props: ThreadProps) {
           childrenByParent={props.childrenByParent}
           userId={props.userId}
           canInteract={props.canInteract}
+          nowTick={props.nowTick}
           editingReplyId={props.editingReplyId}
           editReplyDraft={props.editReplyDraft}
           replyEditSaving={props.replyEditSaving}

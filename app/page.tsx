@@ -3,6 +3,8 @@
 import React, {
   startTransition,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -16,7 +18,6 @@ import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
-import { parseModerateResponse } from "@/lib/parse-moderate-response";
 import {
   DEFAULT_REPLY_TOXICITY_THRESHOLD,
   fetchReplyToxicityThreshold,
@@ -29,8 +30,27 @@ import {
   canEditOwnPost,
   formatRemainingLabel,
   getEditRemainingMs,
+  resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
+import { timelineFinalScore } from "@/lib/timeline-affinity";
+import {
+  POST_DEV_SCORES_KEY,
+  REPLY_DEV_SCORES_KEY,
+  loadDevScoresFromLocalStorage,
+  mergeDevScoresById,
+  parseRawToDevScores,
+  persistDevScoresToLocalStorage,
+} from "@/lib/dev-scores-local-storage";
+import {
+  fetchPerspectiveScoresForText,
+  loadPostIdsPendingSecondModeration,
+  loadReplyIdsPendingSecondModeration,
+  markPostNeedsSecondModeration,
+  markReplyNeedsSecondModeration,
+  removePostNeedsSecondModeration,
+  removeReplyNeedsSecondModeration,
+} from "@/lib/pending-second-moderation";
 
 const supabase = createClient();
 
@@ -51,27 +71,6 @@ type Post = {
 
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 const RELATION_PENALTY_WINDOW_DAYS = 14;
-
-/** テスト用5指標（DBには保存しない。同一ブラウザでの校正用） */
-const POST_DEV_SCORES_KEY = "heiwa_post_dev_five_scores_v1";
-const REPLY_DEV_SCORES_KEY = "heiwa_reply_dev_five_scores_v1";
-
-type DevFiveScores = {
-  first?: Record<string, number>;
-  second?: Record<string, number>;
-};
-
-function resolveVisibleContent(
-  content: string,
-  pendingContent: string | null | undefined,
-  createdAt: string | undefined
-) {
-  if (!pendingContent?.trim() || !createdAt) return content;
-  const created = new Date(createdAt).getTime();
-  if (Number.isNaN(created)) return content;
-  if (Date.now() - created < 15 * 60 * 1000) return content;
-  return pendingContent;
-}
 
 type PostReply = {
   id: number;
@@ -127,18 +126,19 @@ export default function Home() {
   const [replyToxicityThreshold, setReplyToxicityThreshold] = useState(
     DEFAULT_REPLY_TOXICITY_THRESHOLD
   );
-  /** 5指標テスト表示（画面用のみ・localStorage） */
-  const [postScoresById, setPostScoresById] = useState<
-    Record<number, DevFiveScores>
-  >({});
-  const [replyScoresById, setReplyScoresById] = useState<
-    Record<number, DevFiveScores>
-  >({});
+  /** 5指標テスト表示（画面用のみ・localStorage。初期化で読み込まないと空 {} が先に保存され消える） */
+  const [postScoresById, setPostScoresById] = useState(() =>
+    loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
+  );
+  const [replyScoresById, setReplyScoresById] = useState(() =>
+    loadDevScoresFromLocalStorage(REPLY_DEV_SCORES_KEY)
+  );
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
+  /** 数秒で消える通知（編集保存・注意など） */
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
@@ -179,6 +179,11 @@ export default function Home() {
   const [editingReplyId, setEditingReplyId] = useState<number | null>(null);
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
+  const postScoresByIdRef = useRef(postScoresById);
+  const replyScoresByIdRef = useRef(replyScoresById);
+  const secondModerationBusyRef = useRef<Set<string>>(new Set());
+  postScoresByIdRef.current = postScoresById;
+  replyScoresByIdRef.current = replyScoresById;
   const userId = user?.id ?? null;
 
   const needsNickname =
@@ -189,56 +194,34 @@ export default function Home() {
   }, [needsNickname]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const rawP = window.localStorage.getItem(POST_DEV_SCORES_KEY);
-      if (rawP) {
-        const parsed = JSON.parse(rawP) as Record<string, DevFiveScores>;
-        const next: Record<number, DevFiveScores> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          const id = Number(k);
-          if (!Number.isFinite(id) || !v?.first) continue;
-          next[id] = {
-            first: v.first,
-            ...(v.second ? { second: v.second } : {}),
-          };
-        }
-        setPostScoresById(next);
-      }
-      const rawR = window.localStorage.getItem(REPLY_DEV_SCORES_KEY);
-      if (rawR) {
-        const parsed = JSON.parse(rawR) as Record<string, DevFiveScores>;
-        const next: Record<number, DevFiveScores> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          const id = Number(k);
-          if (!Number.isFinite(id) || !v?.first) continue;
-          next[id] = {
-            first: v.first,
-            ...(v.second ? { second: v.second } : {}),
-          };
-        }
-        setReplyScoresById(next);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+    if (!toastMessage) return;
+    const t = window.setTimeout(() => setToastMessage(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [toastMessage]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      POST_DEV_SCORES_KEY,
-      JSON.stringify(postScoresById)
-    );
+    persistDevScoresToLocalStorage(POST_DEV_SCORES_KEY, postScoresById);
   }, [postScoresById]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      REPLY_DEV_SCORES_KEY,
-      JSON.stringify(replyScoresById)
-    );
+    persistDevScoresToLocalStorage(REPLY_DEV_SCORES_KEY, replyScoresById);
   }, [replyScoresById]);
+
+  /** 別タブ・別ウィンドウで保存したスコアをマージ（同一ブラウザ・ユーザー切替と無関係） */
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === POST_DEV_SCORES_KEY && e.newValue) {
+        const incoming = parseRawToDevScores(e.newValue);
+        setPostScoresById((prev) => mergeDevScoresById(prev, incoming));
+      }
+      if (e.key === REPLY_DEV_SCORES_KEY && e.newValue) {
+        const incoming = parseRawToDevScores(e.newValue);
+        setReplyScoresById((prev) => mergeDevScoresById(prev, incoming));
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
@@ -250,7 +233,9 @@ export default function Home() {
       const post = posts.find((p) => p.id === editingPostId);
       if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
         setEditingPostId(null);
-        setNoticeMessage("編集時間が終了しました。最後に保存した内容が15分後に反映されます。");
+        setToastMessage(
+          "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。"
+        );
       }
     }
     if (editingReplyId != null) {
@@ -258,7 +243,9 @@ export default function Home() {
       const reply = allReplies.find((r) => r.id === editingReplyId);
       if (reply && getEditRemainingMs(reply.created_at, nowTick) <= 0) {
         setEditingReplyId(null);
-        setNoticeMessage("編集時間が終了しました。最後に保存した内容が15分後に反映されます。");
+        setToastMessage(
+          "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。"
+        );
       }
     }
   }, [nowTick, editingPostId, editingReplyId, posts, repliesByPost]);
@@ -278,6 +265,16 @@ export default function Home() {
   }
 
   const fetchPosts = async () => {
+    if (userId) {
+      try {
+        await fetch("/api/finalize-my-pending", {
+          method: "POST",
+          credentials: "same-origin",
+        });
+      } catch {
+        /* 確定 API が失敗しても一覧取得は続行 */
+      }
+    }
     const { data: rows, error } = await supabase
       .from("posts")
       .select("*")
@@ -328,7 +325,6 @@ export default function Home() {
 
     const merged: Post[] = list.map((p) => ({
       ...p,
-      content: resolveVisibleContent(p.content, p.pending_content, p.created_at),
       users: {
         nickname: p.user_id
           ? (profileByUserId.get(p.user_id)?.nickname ?? null)
@@ -364,6 +360,23 @@ export default function Home() {
       }
     }
 
+    const affinityLikeScoreByAuthor = new Map<string, number>();
+    if (userId) {
+      const { data: affRows, error: affErr } = await supabase
+        .from("user_affinity")
+        .select("to_user_id, like_score")
+        .eq("from_user_id", userId);
+      if (!affErr) {
+        for (const row of affRows ?? []) {
+          const toId = row.to_user_id as string;
+          affinityLikeScoreByAuthor.set(
+            toId,
+            typeof row.like_score === "number" ? row.like_score : 0
+          );
+        }
+      }
+    }
+
     const timelinePosts = merged
       .filter((p) => {
         const score =
@@ -371,11 +384,23 @@ export default function Home() {
         return score <= timelineToxicityThreshold;
       })
       .sort((a, b) => {
-        const ma = a.user_id ? (relationMultiplierByAuthor.get(a.user_id) ?? 1) : 1;
-        const mb = b.user_id ? (relationMultiplierByAuthor.get(b.user_id) ?? 1) : 1;
-        if (mb !== ma) return mb - ma;
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
         const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        const toxA = a.user_id
+          ? (relationMultiplierByAuthor.get(a.user_id) ?? 1)
+          : 1;
+        const toxB = b.user_id
+          ? (relationMultiplierByAuthor.get(b.user_id) ?? 1)
+          : 1;
+        const likeA = a.user_id
+          ? (affinityLikeScoreByAuthor.get(a.user_id) ?? 0)
+          : 0;
+        const likeB = b.user_id
+          ? (affinityLikeScoreByAuthor.get(b.user_id) ?? 0)
+          : 0;
+        const fa = timelineFinalScore(ta, toxA, likeA);
+        const fb = timelineFinalScore(tb, toxB, likeB);
+        if (fb !== fa) return fb - fa;
         return tb - ta;
       });
 
@@ -442,7 +467,6 @@ export default function Home() {
         const rp = replyProfileByUserId.get(r.user_id);
         arr.push({
           ...r,
-          content: resolveVisibleContent(r.content, r.pending_content, r.created_at),
           users: {
             nickname: rp?.nickname ?? null,
             avatar_url: rp?.avatar_url ?? null,
@@ -456,6 +480,147 @@ export default function Home() {
 
     setErrorMessage(null);
   };
+
+  const fetchPostsRef = useRef(fetchPosts);
+  fetchPostsRef.current = fetchPosts;
+
+  const hasPendingContent = useMemo(
+    () =>
+      posts.some((p) => Boolean(p.pending_content?.trim())) ||
+      Object.values(repliesByPost)
+        .flat()
+        .some((r) => Boolean(r.pending_content?.trim())),
+    [posts, repliesByPost]
+  );
+
+  /** pending 中に加え、2行目未取得の post/reply id が localStorage に残っている間もポーリング */
+  const shouldPollTimeline = useMemo(() => {
+    if (hasPendingContent) return true;
+    if (typeof window === "undefined") return false;
+    try {
+      return (
+        loadPostIdsPendingSecondModeration().length > 0 ||
+        loadReplyIdsPendingSecondModeration().length > 0
+      );
+    } catch {
+      return false;
+    }
+  }, [hasPendingContent, postScoresById, replyScoresById]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!shouldPollTimeline) return;
+    const id = window.setInterval(() => {
+      void fetchPostsRef.current();
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [authReady, shouldPollTimeline]);
+
+  /** pending が消えた直後（cron 確定直後）に即再取得し、2行目取得 effect が確定本文を見られるようにする */
+  const hadPendingContentRef = useRef(false);
+  useEffect(() => {
+    if (!authReady) return;
+    if (hadPendingContentRef.current && !hasPendingContent) {
+      const needSecond =
+        loadPostIdsPendingSecondModeration().length > 0 ||
+        loadReplyIdsPendingSecondModeration().length > 0;
+      if (needSecond) void fetchPostsRef.current();
+    }
+    hadPendingContentRef.current = hasPendingContent;
+  }, [authReady, hasPendingContent]);
+
+  /** 編集確定後（pending 消滅後）、確定本文で /api/moderate を1回叩いて2行目を埋める（DBには5指標を書かない） */
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+
+    void (async () => {
+      for (const postId of loadPostIdsPendingSecondModeration()) {
+        if (cancelled) return;
+        const post = posts.find((p) => p.id === postId);
+        if (!post) {
+          removePostNeedsSecondModeration(postId);
+          continue;
+        }
+        if (post.pending_content?.trim()) continue;
+
+        const prev = postScoresByIdRef.current;
+        /** 初回スコアが localStorage に無い場合でも、確定後の2行目だけは取得する */
+        if (prev[postId]?.second) continue;
+
+        const busyKey = `p:${postId}`;
+        if (secondModerationBusyRef.current.has(busyKey)) continue;
+        secondModerationBusyRef.current.add(busyKey);
+        try {
+          const text = (post.content ?? "").trim();
+          if (!text) {
+            removePostNeedsSecondModeration(postId);
+            continue;
+          }
+          const scores = await fetchPerspectiveScoresForText(text);
+          if (cancelled) return;
+          if (Object.keys(scores).length === 0) {
+            removePostNeedsSecondModeration(postId);
+            continue;
+          }
+          setPostScoresById((p) => {
+            if (p[postId]?.second) return p;
+            return { ...p, [postId]: { ...p[postId], second: scores } };
+          });
+          removePostNeedsSecondModeration(postId);
+        } catch (e) {
+          console.warn("second moderation row:", e);
+        } finally {
+          secondModerationBusyRef.current.delete(busyKey);
+        }
+      }
+
+      for (const replyId of loadReplyIdsPendingSecondModeration()) {
+        if (cancelled) return;
+        const reply = Object.values(repliesByPost)
+          .flat()
+          .find((r) => r.id === replyId);
+        if (!reply) {
+          removeReplyNeedsSecondModeration(replyId);
+          continue;
+        }
+        if (reply.pending_content?.trim()) continue;
+
+        const prev = replyScoresByIdRef.current;
+        if (prev[replyId]?.second) continue;
+
+        const busyKey = `r:${replyId}`;
+        if (secondModerationBusyRef.current.has(busyKey)) continue;
+        secondModerationBusyRef.current.add(busyKey);
+        try {
+          const text = (reply.content ?? "").trim();
+          if (!text) {
+            removeReplyNeedsSecondModeration(replyId);
+            continue;
+          }
+          const scores = await fetchPerspectiveScoresForText(text);
+          if (cancelled) return;
+          if (Object.keys(scores).length === 0) {
+            removeReplyNeedsSecondModeration(replyId);
+            continue;
+          }
+          setReplyScoresById((p) => {
+            if (p[replyId]?.second) return p;
+            return { ...p, [replyId]: { ...p[replyId], second: scores } };
+          });
+          removeReplyNeedsSecondModeration(replyId);
+        } catch (e) {
+          console.warn("second moderation row (reply):", e);
+        } finally {
+          secondModerationBusyRef.current.delete(busyKey);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, posts, repliesByPost, postScoresById, replyScoresById]);
 
   const fetchLikes = async (uid: string) => {
     const { data, error } = await supabase
@@ -771,7 +936,7 @@ export default function Home() {
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
       if (overallMax >= replyToxicityThreshold) {
-        setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
+        setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
       }
       await fetchPosts();
     } catch (err) {
@@ -807,7 +972,6 @@ export default function Home() {
     }
     setReplyEditSaving(true);
     setErrorMessage(null);
-    setNoticeMessage(null);
     const { error } = await supabase
       .from("post_replies")
       .update({ pending_content: content })
@@ -819,7 +983,8 @@ export default function Home() {
       return;
     }
     setEditingReplyId(null);
-    setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
+    markReplyNeedsSecondModeration(replyId);
+    setToastMessage("編集を保存しました。15分後に反映されます。");
     await fetchPosts();
   };
 
@@ -849,7 +1014,6 @@ export default function Home() {
     }
     setPostEditSaving(true);
     setErrorMessage(null);
-    setNoticeMessage(null);
     const { error } = await supabase
       .from("posts")
       .update({ pending_content: content })
@@ -861,7 +1025,8 @@ export default function Home() {
       return;
     }
     setEditingPostId(null);
-    setNoticeMessage("編集内容を保存しました。投稿から15分経過後に反映されます。");
+    markPostNeedsSecondModeration(postId);
+    setToastMessage("編集を保存しました。15分後に反映されます。");
     await fetchPosts();
   };
 
@@ -912,18 +1077,18 @@ export default function Home() {
       } else {
         setModerationDegradedMessage(null);
       }
-      const rawScores = normalizePerspectiveScores(
+      postScores = normalizePerspectiveScores(
         json.paragraphs?.[0]?.scores as Record<string, unknown> | undefined
       );
-      if (Object.keys(rawScores).length > 0) {
-        postScores = rawScores;
+      let maxFromApi =
+        typeof json.overallMax === "number" ? json.overallMax : 0;
+      if (
+        maxFromApi === 0 &&
+        Object.keys(postScores).length > 0
+      ) {
+        maxFromApi = Math.max(...Object.values(postScores));
       }
-      const snap = parseModerateResponse(json);
-      if (snap) {
-        postOverallMax = snap.overallMax;
-      } else if (typeof json?.overallMax === "number") {
-        postOverallMax = json.overallMax;
-      }
+      postOverallMax = maxFromApi;
     } catch (err) {
       console.error("moderation error:", err);
       setErrorMessage("AI判定に失敗しました。");
@@ -956,9 +1121,7 @@ export default function Home() {
       setInput("");
       setComposeOpen(false);
       if (postOverallMax >= timelineToxicityThreshold) {
-        setNoticeMessage(OTHER_USERS_VISIBILITY_NOTICE);
-      } else {
-        setNoticeMessage(null);
+        setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
       }
       await fetchPosts();
     }
@@ -1005,12 +1168,24 @@ export default function Home() {
       return;
     }
 
+    const authorId = posts.find((p) => p.id === postId)?.user_id;
+    if (authorId && authorId !== userId) {
+      const { error: affErr } = await supabase.rpc(
+        "apply_user_affinity_on_like",
+        { p_liker: userId, p_author: authorId }
+      );
+      if (affErr) {
+        console.warn("user_affinity rpc:", affErr.message);
+      }
+    }
+
     setErrorMessage(null);
     setLikedPostIds((prev) => {
       const next = new Set(prev);
       next.add(postId);
       return next;
     });
+    void fetchPostsRef.current();
   };
 
   const canInteract =
@@ -1072,12 +1247,6 @@ export default function Home() {
             {errorMessage}
           </div>
         ) : null}
-        {noticeMessage?.trim() ? (
-          <div className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
-            {noticeMessage}
-          </div>
-        ) : null}
-
         {authReady && !(userId && !profileReady) ? (
           <>
             {canInteract && composeOpen ? (
@@ -1297,14 +1466,24 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="mt-1 whitespace-pre-wrap break-words">
-                      {renderTextWithLinks(post.content)}
+                      {renderTextWithLinks(
+                        resolvePendingVisibleContent(
+                          post.content,
+                          post.pending_content,
+                          post.created_at,
+                          nowTick
+                        )
+                      )}
                     </div>
                   )}
-                  {postScoresById[post.id]?.first ? (
+                  {postScoresById[post.id]?.first ||
+                  postScoresById[post.id]?.second ? (
                     <div className="mt-1 space-y-1 rounded border border-gray-100 bg-gray-50/80 px-2 py-1">
-                      <ModerationCompactRow
-                        scores={postScoresById[post.id]!.first!}
-                      />
+                      {postScoresById[post.id]?.first ? (
+                        <ModerationCompactRow
+                          scores={postScoresById[post.id]!.first!}
+                        />
+                      ) : null}
                       {postScoresById[post.id]?.second ? (
                         <ModerationCompactRow
                           scores={postScoresById[post.id]!.second!}
@@ -1389,6 +1568,7 @@ export default function Home() {
                             childrenByParent={childrenByParent}
                             userId={userId}
                             canInteract={canInteract}
+                            nowTick={nowTick}
                             editingReplyId={editingReplyId}
                             editReplyDraft={editReplyDraft}
                             replyEditSaving={replyEditSaving}
@@ -1517,6 +1697,16 @@ export default function Home() {
         onSubmit={handleNicknameSubmit}
         errorMessage={nicknameModalError}
       />
+
+      {toastMessage?.trim() ? (
+        <div
+          className="pointer-events-none fixed bottom-24 left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border border-gray-200 bg-gray-900 px-4 py-2.5 text-center text-sm text-white shadow-lg"
+          role="status"
+          aria-live="polite"
+        >
+          {toastMessage}
+        </div>
+      ) : null}
 
     </main>
   );

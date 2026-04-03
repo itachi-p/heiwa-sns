@@ -40,3 +40,21 @@ export function formatRemainingLabel(ms: number): string {
   const ss = (total % 60).toString().padStart(2, "0");
   return `${mm}:${ss}`;
 }
+
+/**
+ * 投稿・返信の「表示用本文」。
+ * pending がある場合、作成から15分経過後は pending を見せる（確定前のプレビュー）。
+ * DB の content は fetch 時点の値のまま保持し、本関数はレンダーごとに呼ぶ（nowMs で時刻が進むと切り替わる）。
+ */
+export function resolvePendingVisibleContent(
+  content: string,
+  pendingContent: string | null | undefined,
+  createdAt: string | undefined,
+  nowMs: number = Date.now()
+): string {
+  if (!pendingContent?.trim() || !createdAt) return content;
+  const created = new Date(createdAt).getTime();
+  if (Number.isNaN(created)) return content;
+  if (nowMs - created < POST_EDIT_WINDOW_MS) return content;
+  return pendingContent;
+}
