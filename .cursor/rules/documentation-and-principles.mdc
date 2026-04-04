@@ -1,0 +1,23 @@
+---
+description: ドキュメント階層・プロダクト不変条件を守る（実装前に参照）
+alwaysApply: true
+---
+
+# ドキュメントとプロダクト原則（Cursor 必須参照）
+
+## 触る前に読む（優先順）
+
+1. **`docs/README.md`** — どの文書が何の役割か（索引）。
+2. **`docs/dev/IMPLEMENTATION_REFERENCE.md`** — タイムライン・毒性・スキの**現行実装**の要約（数式・ファイルパス）。アルゴリズム変更時は **同じ変更で本ファイルを更新**する。
+3. **`docs/PRODUCT_PRINCIPLES.md`** と **`docs/DECISIONS.md`** — 採用済みの思想・決定。**これらと矛盾する挙動・「おまけ」機能を勝手に足さない**。
+4. **`docs/schema.md`** + **`.cursor/rules/database-and-migrations.mdc`** — DB・マイグレーションは **ユーザーが同一スレッドで明示依頼したときのみ**。
+
+## 変更時の同期
+
+- タイムライン順・毒性閾値・スキの効き方を変えたら: **`docs/dev/IMPLEMENTATION_REFERENCE.md`** を必ず更新。手動検証手順に影響があれば **`docs/PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`** も更新。
+- マイグレーションを追加したら: **`docs/schema.md`** を同じコミットで更新（`database-and-migrations.mdc` のルールどおり）。
+- 重要な方針転換は: **`docs/DECISIONS.md`** に短く追記（ユーザー承認後）。
+
+## 招待・外向け文章
+
+- ユーザー向けの段階的説明は **`docs/INVITE_*.md`**。技術詳細を一般向けに書く必要があるときは **深い層**に寄せ、実装の細部は `IMPLEMENTATION_REFERENCE.md` へリンクする。

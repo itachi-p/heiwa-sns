@@ -1,5 +1,7 @@
 # Product Principles
 
+> **Japanese summaries for invite/beta readers**: see `docs/INVITE_AT_A_GLANCE.md` → `INVITE_OVERVIEW.md` → `INVITE_DEEP_DIVE.md`. Full doc map: `docs/README.md`.
+
 ## Purpose
 
 Nagi SNS aims to provide a calm communication space where people are not evaluated by visible numbers.

@@ -12,6 +12,38 @@ Use newest-first entries.
 
 ---
 
+## 2026-04-02
+
+### 投稿者向け毒性注意の閾値を閲覧「標準」（0.7）に統一
+
+- **Status:** accepted
+- **Context:** 旧下書きでは「高スコア非表示」が 0.9 付近の説明と、閲覧デフォルト（標準 0.7）が食い違っていた。運用テスト上、0.7 で十分攻撃的と判断。
+- **Decision:** `HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD` を **`TOXICITY_THRESHOLDS.normal` と同一**（現状 0.7）にする。トースト等の**文言・表示形式は変更しない**。閲覧者が「フィルタしない」(off / 1.0) のときのみ、0.7 超の他人投稿もタイムライン・リプでそのまま見える（従来の閾値比較のまま）。
+- **Consequences:** 0.7〜0.8 帯の投稿・返信でも投稿者に注意が出る。`docs/dev/IMPLEMENTATION_REFERENCE.md` を更新。
+
+### `docs/SYSTEM_SPEC.md` をリポジトリから削除
+
+- **Status:** accepted
+- **Context:** ChatGPT 生成下書きをローカル保持。スタブのみだと `docs` が冗長。
+- **Decision:** リポジトリからファイルを削除。正は `docs/dev/IMPLEMENTATION_REFERENCE.md` とコード。
+- **Consequences:** 旧パスへのリンクは残さない。
+
+### リプ欄だけ閾値を厳しくする案・タイムライン/リプで別フィルタ設定（保留）
+
+- **Status:** deferred (open)
+- **Context:** リプのみ 0.5 等に下げる案は廃案ではない。ユーザー毎にフィルタを二系統に分ける案も検討余地あり。現状は同一 `toxicity_filter_level`。
+- **Decision:** **当面実装しない**（未実装機能を優先）。
+- **Consequences:** 着手時は閾値の供給元、`replyVisibilityThreshold`、`ReplyThread`、プロフィール UI、`IMPLEMENTATION_REFERENCE.md` をまとめて設計する。
+
+### `docs` の段階別再編と実装参照の一本化
+
+- **Status:** accepted
+- **Context:** 下書きと実装の乖離、README と複数 md の役割重複、Cursor が参照すべき「正」の分散。
+- **Decision:** `docs/README.md` を索引とする。招待向けは `INVITE_AT_A_GLANCE.md` / `INVITE_OVERVIEW.md` / `INVITE_DEEP_DIVE.md`。アルゴリズム・閾値の要約は `docs/dev/IMPLEMENTATION_REFERENCE.md` に集約。`RATIONALE_PUBLIC.md` はリダイレクト用スタブ。Cursor に `.cursor/rules/documentation-and-principles.mdc`（`alwaysApply: true`）を追加。
+- **Consequences:** タイムライン・毒性・スキの挙動を変えたら `IMPLEMENTATION_REFERENCE.md` を同じ変更で更新する。手動検証に影響があれば `PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md` も更新。
+
+---
+
 ## 2026-03-24
 
 ### 「いいね」表記を「スキ」へ変更し、フォロー/ブロックは実装しない（当面）

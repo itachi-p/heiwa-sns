@@ -1,34 +1,9 @@
-# Public Rationale
+# Public Rationale（統合済み）
 
-## Why this project exists
+この文書にあった内容は、日本語の段階別ドキュメントに統合しました。
 
-Nagi SNS is an attempt to reduce harm caused by metric-driven social platforms.
-The goal is not to maximize engagement, but to increase psychological safety in daily communication.
+- **概要・思想（中くらい）**: [INVITE_OVERVIEW.md](INVITE_OVERVIEW.md)
+- **意思決定・実装参照・透明性**: [INVITE_DEEP_DIVE.md](INVITE_DEEP_DIVE.md)
+- **英語の短い原則**: [PRODUCT_PRINCIPLES.md](PRODUCT_PRINCIPLES.md)
 
-## Problems we are addressing
-
-- Comparison pressure from visible numbers.
-- Incentives for hostile or extreme expression.
-- Fear of posting due to public evaluation dynamics.
-
-## What we intentionally do not optimize
-
-- Public scoreboards (like counts, follower counts).
-- Popularity-first ranking loops.
-- Ad-optimization-first product decisions.
-
-## Current design stance
-
-- Keep interactions simple and understandable.
-- Record relationship data where needed, but avoid exposing competitive metrics.
-- Prefer reversible, incremental changes over one-way hard policy jumps.
-
-## Why transparency matters here
-
-This project is open by default in spirit:
-
-- Decisions and trade-offs are documented in `docs/DECISIONS.md`.
-- Principles are documented in `docs/PRODUCT_PRINCIPLES.md`.
-- Rejected options are documented in `docs/ASSUMPTIONS_AND_REJECTED_IDEAS.md`.
-
-If this approach helps others build a better version, that is a success.
+外部リンクや README からここを指している場合は、上記へ誘導を更新してください。

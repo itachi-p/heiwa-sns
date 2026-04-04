@@ -7,6 +7,8 @@ alwaysApply: true
 
 ## 基本
 
+- **ドキュメント**: 仕様・アルゴリズムを変える前に **`docs/README.md`** と **`docs/dev/IMPLEMENTATION_REFERENCE.md`** を確認する。不変条件は **`documentation-and-principles.mdc`**。
+- **DB**: マイグレーション・スキーマ変更は **`database-and-migrations.mdc` の「最優先」**に従う。チャット上の了解だけでは `supabase/migrations/` に触れない。
 - **ユーザーが明示しなくても**、同じ種類の問題が**2回目**に見えた時点で、**再発防止の一文を `.cursor/rules/` か `docs/` に追記する案を出し、承認が取れれば同じセッションで実行する**（長文化しない。箇条書き1〜5行で足りる）。
 - **レグレッション**（以前動いていたのに壊れた）では、**スキーマ変更の前に** `git log` / `git grep` / 差分で原因を切り分ける。詳細は `database-and-migrations.mdc`。
 - **新しい「確定仕様」**が出たら、`docs/schema.md` または該当ルールに**一行メモ**でよいので残す（ユーザーが「書くな」と言った領域は触らない）。

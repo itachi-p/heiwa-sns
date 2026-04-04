@@ -18,9 +18,10 @@ export const TOXICITY_SCORE_NOISE_FLOOR = 0.1;
 
 /**
  * 投稿直後・返信直後に投稿者へ「見えにくくなるかも」と出すライン。
- * レベル閾値（TOXICITY_THRESHOLDS）とは独立に調整してよい。
+ * 既定閲覧フィルタ「標準」と同じ値（{@link TOXICITY_THRESHOLDS.normal}）に揃える。
+ * 閲覧者が「フィルタしない」(off) のときのみ、0.7 超の投稿もタイムライン・リプでそのまま見える。
  */
-export const HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD = 0.8;
+export const HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD = TOXICITY_THRESHOLDS.normal;
 
 export type ToxicityFilterLevel = keyof typeof TOXICITY_THRESHOLDS;
 

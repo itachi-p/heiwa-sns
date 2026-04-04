@@ -30,3 +30,4 @@
 - How to communicate safety actions transparently without increasing fear?
 - What minimal feedback is needed so users understand content visibility changes?
 - Which moderation signals should remain private vs. explainable to users?
+- **Stricter threshold for replies only** (e.g. 0.5 vs timeline 0.7) and **separate filter settings for timeline vs replies**: deferred; same `toxicity_filter_level` for both today. See [DECISIONS.md](DECISIONS.md) (2026-04-02, reply-threshold section).
