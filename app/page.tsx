@@ -1152,8 +1152,12 @@ export default function Home() {
     const content = editDraft.trim();
     const existing = posts.find((p) => p.id === postId);
     const hasImage = Boolean(existing?.image_storage_path?.trim());
-    if (!content && !hasImage) {
-      setErrorMessage("本文を入力してください。");
+    if (!content) {
+      setErrorMessage(
+        hasImage
+          ? "画像を付けた投稿には本文が必要です。本文を入力してください。"
+          : "本文を入力してください。"
+      );
       return;
     }
     setPostEditSaving(true);
@@ -1183,6 +1187,10 @@ export default function Home() {
     if (needsNickname) return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) return;
+    if (!textContent && composePostImage) {
+      setErrorMessage("画像を添付する場合は本文を入力してください。");
+      return;
+    }
 
     setPostSubmitting(true);
     setErrorMessage(null);
