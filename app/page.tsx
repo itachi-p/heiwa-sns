@@ -585,7 +585,10 @@ export default function Home() {
     } catch {
       return false;
     }
-  }, [hasPendingContent]);
+    // postScoresById / replyScoresById は本文に出てこないが、更新時に localStorage の
+    // second-moderation キューが空になったか再評価してポーリング停止させるために必要
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPendingContent, postScoresById, replyScoresById]);
 
   useEffect(() => {
     if (!authReady) return;

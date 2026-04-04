@@ -542,7 +542,8 @@ export default function HomePage() {
     } catch {
       return false;
     }
-  }, [hasPendingContent]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPendingContent, postScoresById, replyScoresById]);
 
   useEffect(() => {
     if (!userId || !profileReady) return;
