@@ -542,7 +542,7 @@ export default function HomePage() {
     } catch {
       return false;
     }
-  }, [hasPendingContent, postScoresById, replyScoresById]);
+  }, [hasPendingContent]);
 
   useEffect(() => {
     if (!userId || !profileReady) return;

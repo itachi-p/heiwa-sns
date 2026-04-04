@@ -28,6 +28,8 @@ export function UserAvatar({
       : "h-8 w-8 text-xs";
   if (avatarUrl) {
     return (
+      // 外部 Storage URL のため next/image のドメイン設定より img を使用
+      // eslint-disable-next-line @next/next/no-img-element
       <img
         src={avatarUrl}
         alt={name ? `${name}のアイコン` : "ユーザーアイコン"}

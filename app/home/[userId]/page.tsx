@@ -71,6 +71,8 @@ export default function UserHomePage() {
 
   const sessionId = sessionUser?.id ?? null;
   const isOwn = Boolean(sessionId && targetId === sessionId);
+  /** UUID 形式でない URL は fetch せず、表示だけで判定（effect 内の同期 setState を避ける） */
+  const idInvalid = targetId.length > 0 && !isLikelyUserId(targetId);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -86,19 +88,15 @@ export default function UserHomePage() {
   }, []);
 
   useEffect(() => {
-    if (!authReady || !sessionUser) return;
-    if (!isLikelyUserId(targetId)) {
-      setNotFound(true);
-      setLoading(false);
-      return;
-    }
+    if (!authReady || !sessionUser || idInvalid) return;
 
     let cancelled = false;
-    setLoading(true);
-    setErrorMessage(null);
-    setNotFound(false);
 
     void (async () => {
+      setLoading(true);
+      setErrorMessage(null);
+      setNotFound(false);
+
       const { data: profile, error: profileErr } = await supabase
         .from("users")
         .select("nickname, avatar_url, avatar_placeholder_hex, bio")
@@ -179,7 +177,7 @@ export default function UserHomePage() {
     return () => {
       cancelled = true;
     };
-  }, [authReady, sessionUser, targetId]);
+  }, [authReady, sessionUser, targetId, idInvalid]);
 
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
@@ -209,10 +207,10 @@ export default function UserHomePage() {
             </Link>
             からログインしてください。
           </p>
+        ) : notFound || idInvalid ? (
+          <p className="text-sm text-gray-600">ユーザーが見つかりません。</p>
         ) : loading ? (
           <p className="text-gray-600">読み込み中…</p>
-        ) : notFound ? (
-          <p className="text-sm text-gray-600">ユーザーが見つかりません。</p>
         ) : (
           <>
             {errorMessage ? (

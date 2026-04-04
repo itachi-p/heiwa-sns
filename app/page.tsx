@@ -585,7 +585,7 @@ export default function Home() {
     } catch {
       return false;
     }
-  }, [hasPendingContent, postScoresById, replyScoresById]);
+  }, [hasPendingContent]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -866,6 +866,8 @@ export default function Home() {
         setErrorMessage("データの取得に失敗しました。");
       }
     })();
+    // fetchPosts は毎レンダー再生成のため依存に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authReady, userId, profileReady, toxicityFilterLevel]);
 
   useEffect(() => {
