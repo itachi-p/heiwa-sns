@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React from "react";
+import React, { useState } from "react";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { UserAvatar } from "@/components/user-avatar";
 import {
@@ -10,6 +10,7 @@ import {
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
+import { effectiveScoreForViewerToxicityFilter } from "@/lib/toxicity-filter-level";
 
 export type PostReplyRow = {
   id: number;
@@ -59,7 +60,7 @@ type ItemProps = {
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
-  /** 閲覧者のリプ許容度（この値以上なら他人から本文を隠す） */
+  /** 閲覧者の攻撃性フィルタ閾値（この値を超える他人の返信は折りたたみ） */
   replyVisibilityThreshold: number;
   replyScoresById: Record<
     number,
@@ -92,15 +93,17 @@ function ReplyItem({
   onDelete,
   onReplyToReply,
 }: ItemProps) {
+  const [foldExpanded, setFoldExpanded] = useState(false);
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
   const remainingLabel = formatRemainingLabel(getEditRemainingMs(reply.created_at));
 
   const isAuthor = userId != null && userId === reply.user_id;
-  const maxScore =
-    typeof reply.moderation_max_score === "number" ? reply.moderation_max_score : 0;
-  const hideReplyBody =
-    !isAuthor && maxScore >= replyVisibilityThreshold;
+  const maxScore = effectiveScoreForViewerToxicityFilter(
+    reply.moderation_max_score
+  );
+  const replyFolded =
+    !isAuthor && maxScore > replyVisibilityThreshold;
 
   const replyScores = replyScoresById[reply.id];
   const hasDevScores =
@@ -204,10 +207,19 @@ function ReplyItem({
             </button>
           </div>
         </div>
-      ) : hideReplyBody ? (
-        <p className="mt-1 text-sm italic text-gray-500">
-          この返信は、攻撃性の可能性があるため表示を控えています。
-        </p>
+      ) : replyFolded && !foldExpanded ? (
+        <div className="mt-1 space-y-2 rounded-md border border-amber-100 bg-amber-50/60 px-2 py-2 text-sm text-amber-950">
+          <p className="text-gray-700">
+            この返信は表示が制限されています
+          </p>
+          <button
+            type="button"
+            onClick={() => setFoldExpanded(true)}
+            className="text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
+          >
+            タップして表示
+          </button>
+        </div>
       ) : (
         <div className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-800">
           {renderTextWithLinks(

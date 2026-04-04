@@ -8,12 +8,19 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
+import { fetchToxicityFilterLevel } from "@/lib/timeline-threshold";
 import {
-  DEFAULT_REPLY_TOXICITY_THRESHOLD,
-  fetchReplyToxicityThreshold,
-  fetchTimelineToxicityThreshold,
-} from "@/lib/timeline-threshold";
-import { OTHER_USERS_VISIBILITY_NOTICE } from "@/lib/visibility-notice";
+  POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
+  REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
+} from "@/lib/visibility-notice";
+import {
+  DEFAULT_TOXICITY_FILTER_LEVEL,
+  HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  thresholdForLevel,
+  TOXICITY_FILTER_LEVEL_LABELS,
+  TOXICITY_FILTER_SELECT_ORDER,
+  type ToxicityFilterLevel,
+} from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import {
   filterPresetRows,
@@ -117,10 +124,10 @@ export default function HomePage() {
     string | null
   >(null);
   const [profileBio, setProfileBio] = useState("");
-  const [profileTimelineToxicityThreshold, setProfileTimelineToxicityThreshold] =
-    useState(0.7);
-  const [profileReplyToxicityThreshold, setProfileReplyToxicityThreshold] =
-    useState(DEFAULT_REPLY_TOXICITY_THRESHOLD);
+  const [toxicityFilterLevel, setToxicityFilterLevel] =
+    useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
+  const [toxicityFilterDraft, setToxicityFilterDraft] =
+    useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
   const [postScoresById, setPostScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
   );
@@ -129,7 +136,6 @@ export default function HomePage() {
   );
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
-  const [timelineThresholdDraft, setTimelineThresholdDraft] = useState("0.7");
   const [presetRows, setPresetRows] = useState<InterestPick[]>([]);
   const [interestPicksServer, setInterestPicksServer] = useState<
     InterestPick[]
@@ -292,8 +298,7 @@ export default function HomePage() {
       profile = fallback.data as ProfileRow | null;
     }
 
-    const threshold = await fetchTimelineToxicityThreshold(supabase, uid);
-    const replyThreshold = await fetchReplyToxicityThreshold(supabase, uid);
+    const filterLevel = await fetchToxicityFilterLevel(supabase, uid);
 
     // プリセットだけでなく、誰かが登録した is_preset=false も共有マスタなので検索対象に含める
     const catalogRes = await supabase
@@ -424,17 +429,16 @@ export default function HomePage() {
     setProfileAvatarUrl(avatarUrl);
     setProfilePlaceholderHex(placeholderHex);
     setProfileBio(bio);
-    setProfileTimelineToxicityThreshold(threshold);
-    setProfileReplyToxicityThreshold(replyThreshold);
+    setToxicityFilterLevel(filterLevel);
     setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
       setInterestDraft(picks);
+      setToxicityFilterDraft(filterLevel);
     }
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
     setBioDraft(bio);
-    setTimelineThresholdDraft(threshold.toFixed(2));
 
     const warn = [catalogWarning, uiWarning].filter(Boolean).join(" ");
     setErrorMessage(warn || null);
@@ -643,9 +647,8 @@ export default function HomePage() {
       setEditingPostId(null);
       setReplyParentReplyId(null);
       setEditingReplyId(null);
-      setProfileTimelineToxicityThreshold(0.7);
-      setProfileReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
-      setTimelineThresholdDraft("0.7");
+      setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
+      setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
       return;
     }
 
@@ -685,9 +688,8 @@ export default function HomePage() {
     setEditingPostId(null);
     setReplyParentReplyId(null);
     setEditingReplyId(null);
-    setProfileTimelineToxicityThreshold(0.7);
-    setProfileReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
-    setTimelineThresholdDraft("0.7");
+    setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
+    setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
   };
 
   const handleDeletePost = async (postId: number) => {
@@ -857,8 +859,8 @@ export default function HomePage() {
           console.warn("reply_toxic_events insert failed:", evErr.message);
         }
       }
-      if (overallMax >= profileReplyToxicityThreshold) {
-        setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
+      if (overallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
+        setToastMessage(REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE);
       }
       await fetchOwnPosts(userId);
     } catch (err) {
@@ -1000,8 +1002,8 @@ export default function HomePage() {
 
     setDraft("");
     setComposeOpen(false);
-    if (postOverallMax >= profileTimelineToxicityThreshold) {
-      setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
+    if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
+      setToastMessage(POST_HIGH_TOXICITY_VISIBILITY_NOTICE);
     }
     await fetchOwnPosts(userId);
     setSubmitting(false);
@@ -1064,12 +1066,6 @@ export default function HomePage() {
       setErrorMessage(result.message);
       return;
     }
-    const parsedThreshold = Number(timelineThresholdDraft);
-    const timelineThreshold = Math.max(0.1, Math.min(0.7, parsedThreshold));
-    if (!Number.isFinite(parsedThreshold)) {
-      setErrorMessage("攻撃性しきい値は数値で入力してください。");
-      return;
-    }
 
     setProfileSaving(true);
     setErrorMessage(null);
@@ -1108,7 +1104,7 @@ export default function HomePage() {
       nickname: result.value,
       bio: bioDraft.trim(),
       interest_custom_creations_count: customCreationsUsed,
-      timeline_toxicity_threshold: timelineThreshold,
+      toxicity_filter_level: toxicityFilterDraft,
     };
     const patch = !profilePlaceholderHex
       ? { ...baseUpdate, avatar_placeholder_hex: hex }
@@ -1143,8 +1139,7 @@ export default function HomePage() {
 
     setProfileNickname(result.value);
     setProfileBio(bioDraft.trim());
-    setProfileTimelineToxicityThreshold(timelineThreshold);
-    setTimelineThresholdDraft(timelineThreshold.toFixed(2));
+    setToxicityFilterLevel(toxicityFilterDraft);
     if (appliedHex) {
       setProfilePlaceholderHex(appliedHex);
     }
@@ -1208,6 +1203,7 @@ export default function HomePage() {
         setInterestDraft([...interestPicksServer]);
         setInterestSearchQuery("");
         setInterestConfirm(null);
+        setToxicityFilterDraft(toxicityFilterLevel);
       }
       return !prev;
     });
@@ -1545,19 +1541,25 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
-                    タイムライン攻撃性しきい値（0.1〜0.7）
+                    表示フィルタ
                   </label>
-                  <input
-                    type="number"
-                    min={0.1}
-                    max={0.7}
-                    step={0.05}
-                    value={timelineThresholdDraft}
-                    onChange={(e) => setTimelineThresholdDraft(e.target.value)}
-                    className="w-40 rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
+                  <select
+                    value={toxicityFilterDraft}
+                    onChange={(e) =>
+                      setToxicityFilterDraft(
+                        e.target.value as ToxicityFilterLevel
+                      )
+                    }
+                    className="w-full max-w-md rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  >
+                    {TOXICITY_FILTER_SELECT_ORDER.map((v) => (
+                      <option key={v} value={v}>
+                        {TOXICITY_FILTER_LEVEL_LABELS[v]}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-xs text-gray-500">
-                    この値を超える投稿は、あなたのタイムラインに表示しません。
+                    攻撃性の高い投稿や返信の見え方を調整します。この設定は他のユーザーには表示されません。
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1652,9 +1654,7 @@ export default function HomePage() {
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
-                      setTimelineThresholdDraft(
-                        profileTimelineToxicityThreshold.toFixed(2)
-                      );
+                      setToxicityFilterDraft(toxicityFilterLevel);
                       setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
@@ -1955,8 +1955,8 @@ export default function HomePage() {
                               replyEditSaving={replyEditSaving}
                               replyVisibilityThreshold={
                                 userId
-                                  ? profileReplyToxicityThreshold
-                                  : DEFAULT_REPLY_TOXICITY_THRESHOLD
+                                  ? thresholdForLevel(toxicityFilterLevel)
+                                  : thresholdForLevel(DEFAULT_TOXICITY_FILTER_LEVEL)
                               }
                               replyScoresById={replyScoresById}
                               onEditDraftChange={setEditReplyDraft}

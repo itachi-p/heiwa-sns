@@ -19,11 +19,20 @@ import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
 import {
-  DEFAULT_REPLY_TOXICITY_THRESHOLD,
-  fetchReplyToxicityThreshold,
-  fetchTimelineToxicityThreshold,
+  ANON_TOXICITY_VIEW_THRESHOLD,
+  fetchToxicityFilterLevel,
 } from "@/lib/timeline-threshold";
-import { OTHER_USERS_VISIBILITY_NOTICE } from "@/lib/visibility-notice";
+import {
+  POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
+  REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
+} from "@/lib/visibility-notice";
+import {
+  DEFAULT_TOXICITY_FILTER_LEVEL,
+  effectiveScoreForViewerToxicityFilter,
+  HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  thresholdForLevel,
+  type ToxicityFilterLevel,
+} from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { validateNickname } from "@/lib/nickname";
 import {
@@ -120,12 +129,9 @@ export default function Home() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
-  const [timelineToxicityThreshold, setTimelineToxicityThreshold] =
-    useState(0.7);
-  /** リプ欄の閲覧しきい値（既定 0.5。users.reply_toxicity_threshold） */
-  const [replyToxicityThreshold, setReplyToxicityThreshold] = useState(
-    DEFAULT_REPLY_TOXICITY_THRESHOLD
-  );
+  /** users.toxicity_filter_level（タイムライン・リプの閾値は TOXICITY_THRESHOLDS で導出） */
+  const [toxicityFilterLevel, setToxicityFilterLevel] =
+    useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
   /** 5指標テスト表示（画面用のみ・localStorage。初期化で読み込まないと空 {} が先に保存され消える） */
   const [postScoresById, setPostScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
@@ -377,11 +383,17 @@ export default function Home() {
       }
     }
 
+    const viewThreshold = userId
+      ? thresholdForLevel(toxicityFilterLevel)
+      : ANON_TOXICITY_VIEW_THRESHOLD;
+
     const timelinePosts = merged
       .filter((p) => {
-        const score =
-          typeof p.moderation_max_score === "number" ? p.moderation_max_score : 0;
-        return score <= timelineToxicityThreshold;
+        const score = effectiveScoreForViewerToxicityFilter(
+          p.moderation_max_score
+        );
+        if (userId && p.user_id === userId) return true;
+        return score <= viewThreshold;
       })
       .sort((a, b) => {
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -703,11 +715,8 @@ export default function Home() {
         (data as { avatar_placeholder_hex?: string | null } | null)
           ?.avatar_placeholder_hex ?? null
       );
-      setTimelineToxicityThreshold(
-        await fetchTimelineToxicityThreshold(supabase, userId)
-      );
-      setReplyToxicityThreshold(
-        await fetchReplyToxicityThreshold(supabase, userId)
+      setToxicityFilterLevel(
+        await fetchToxicityFilterLevel(supabase, userId)
       );
       setProfileReady(true);
     })();
@@ -726,7 +735,7 @@ export default function Home() {
         setErrorMessage("データの取得に失敗しました。");
       }
     })();
-  }, [authReady, userId, profileReady]);
+  }, [authReady, userId, profileReady, toxicityFilterLevel]);
 
   useEffect(() => {
     if (!userId || !profileReady || needsNickname) {
@@ -757,8 +766,7 @@ export default function Home() {
     setProfileAvatarUrl(null);
     setProfilePlaceholderHex(null);
     setProfileReady(false);
-    setTimelineToxicityThreshold(0.7);
-    setReplyToxicityThreshold(DEFAULT_REPLY_TOXICITY_THRESHOLD);
+    setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
     setNicknameDraft("");
     void fetchPosts();
   };
@@ -935,8 +943,8 @@ export default function Home() {
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
-      if (overallMax >= replyToxicityThreshold) {
-        setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
+      if (overallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
+        setToastMessage(REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE);
       }
       await fetchPosts();
     } catch (err) {
@@ -1120,8 +1128,8 @@ export default function Home() {
       }
       setInput("");
       setComposeOpen(false);
-      if (postOverallMax >= timelineToxicityThreshold) {
-        setToastMessage(OTHER_USERS_VISIBILITY_NOTICE);
+      if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
+        setToastMessage(POST_HIGH_TOXICITY_VISIBILITY_NOTICE);
       }
       await fetchPosts();
     }
@@ -1574,8 +1582,8 @@ export default function Home() {
                             replyEditSaving={replyEditSaving}
                             replyVisibilityThreshold={
                               userId
-                                ? replyToxicityThreshold
-                                : DEFAULT_REPLY_TOXICITY_THRESHOLD
+                                ? thresholdForLevel(toxicityFilterLevel)
+                                : ANON_TOXICITY_VIEW_THRESHOLD
                             }
                             replyScoresById={replyScoresById}
                             onEditDraftChange={setEditReplyDraft}

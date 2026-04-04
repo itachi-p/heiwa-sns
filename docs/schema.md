@@ -30,8 +30,9 @@
 | avatar_placeholder_hex | text | |
 | bio | text | |
 | interests | text | レガシー用途の可能性あり（趣味は別テーブルも参照） |
-| timeline_toxicity_threshold | real | 既定 0.7 付近 |
-| reply_toxicity_threshold | real | 既定 0.5 付近 |
+| timeline_toxicity_threshold | real | レガシー（旧UI）。閲覧フィルタは `toxicity_filter_level` を優先 |
+| reply_toxicity_threshold | real | レガシー（旧UI） |
+| toxicity_filter_level | text | `strict` / `soft` / `normal` / `off`。閾値はアプリ定数で解釈 |
 | interest_custom_creations_count | int 等 | マイグレーション参照 |
 
 ### `public.posts`
