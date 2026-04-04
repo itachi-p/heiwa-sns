@@ -857,7 +857,7 @@ export default function HomePage() {
     if (!content) {
       setToast({
         message: hasImage
-          ? "画像を付けた投稿には本文が必要です。本文を入力してください。"
+          ? "投稿には本文が必要です"
           : "本文を入力してください。",
         tone: "error",
       });
