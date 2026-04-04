@@ -45,6 +45,11 @@
 | user_id | uuid | |
 | pending_content | text | 15分編集窓の未確定本文 |
 | moderation_max_score | real | 0〜1、**5指標フルは持たない** |
+| image_storage_path | text | 任意。Storage **`post-images`** バケット内パス（`{user_id}/{post_id}.{ext}`） |
+
+### Storage（投稿画像）
+
+- バケット **`post-images`**（public）。認証ユーザーは自分の `user_id` フォルダ配下のみ upload/update/delete。読み取りは公開。
 
 ### `public.likes`
 
@@ -93,3 +98,4 @@
 |------|------|
 | 2026-04-02 | 初版作成。マイグレーションから集約。 |
 | 2026-04-05 | `user_affinity`・スキ由来タイムライン優先度。 |
+| 2026-04-10 | `posts.image_storage_path`・バケット `post-images`。 |

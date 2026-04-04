@@ -40,6 +40,12 @@ import {
 } from "@/lib/post-edit-window";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
+import {
+  getPostImagePublicUrl,
+  removePostImageIfAny,
+  uploadPostImage,
+  validatePostImageFile,
+} from "@/lib/post-image-storage";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
 import {
   POST_DEV_SCORES_KEY,
@@ -49,6 +55,13 @@ import {
   parseRawToDevScores,
   persistDevScoresToLocalStorage,
 } from "@/lib/dev-scores-local-storage";
+import {
+  idbLoadPostDevScores,
+  idbLoadReplyDevScores,
+  idbSavePostDevScores,
+  idbSaveReplyDevScores,
+} from "@/lib/moderation-scores-indexeddb";
+import { isPastInitialEditWindow } from "@/lib/second-moderation-timing";
 import {
   fetchPerspectiveScoresForText,
   loadPostIdsPendingSecondModeration,
@@ -70,6 +83,7 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
+  image_storage_path?: string | null;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -167,6 +181,10 @@ export default function HomePage() {
   const [replyEditSaving, setReplyEditSaving] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [composeImageFile, setComposeImageFile] = useState<File | null>(null);
+  const [composeImagePreviewUrl, setComposeImagePreviewUrl] = useState<
+    string | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
     "perspective"
@@ -210,12 +228,42 @@ export default function HomePage() {
   }, [toastMessage]);
 
   useEffect(() => {
+    if (!composeImageFile) {
+      setComposeImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(composeImageFile);
+    setComposeImagePreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [composeImageFile]);
+
+  useEffect(() => {
     persistDevScoresToLocalStorage(POST_DEV_SCORES_KEY, postScoresById);
+    void idbSavePostDevScores(postScoresById);
   }, [postScoresById]);
 
   useEffect(() => {
     persistDevScoresToLocalStorage(REPLY_DEV_SCORES_KEY, replyScoresById);
+    void idbSaveReplyDevScores(replyScoresById);
   }, [replyScoresById]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [fromPosts, fromReplies] = await Promise.all([
+        idbLoadPostDevScores(),
+        idbLoadReplyDevScores(),
+      ]);
+      if (cancelled) return;
+      setPostScoresById((p) => mergeDevScoresById(fromPosts, p));
+      setReplyScoresById((p) => mergeDevScoresById(fromReplies, p));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -504,6 +552,10 @@ export default function HomePage() {
         }
         if (post.pending_content?.trim()) continue;
 
+        if (!isPastInitialEditWindow(post.created_at, nowTick)) {
+          continue;
+        }
+
         const prev = postScoresByIdRef.current;
         if (prev[postId]?.second) continue;
 
@@ -523,8 +575,9 @@ export default function HomePage() {
             continue;
           }
           setPostScoresById((p) => {
-            if (!p[postId]?.first || p[postId]?.second) return p;
-            return { ...p, [postId]: { ...p[postId], second: scores } };
+            if (p[postId]?.second) return p;
+            const row = p[postId] ?? {};
+            return { ...p, [postId]: { ...row, second: scores } };
           });
           removePostNeedsSecondModeration(postId);
         } catch (e) {
@@ -544,6 +597,10 @@ export default function HomePage() {
           continue;
         }
         if (reply.pending_content?.trim()) continue;
+
+        if (!isPastInitialEditWindow(reply.created_at, nowTick)) {
+          continue;
+        }
 
         const prev = replyScoresByIdRef.current;
         if (prev[replyId]?.second) continue;
@@ -565,7 +622,8 @@ export default function HomePage() {
           }
           setReplyScoresById((p) => {
             if (p[replyId]?.second) return p;
-            return { ...p, [replyId]: { ...p[replyId], second: scores } };
+            const row = p[replyId] ?? {};
+            return { ...p, [replyId]: { ...row, second: scores } };
           });
           removeReplyNeedsSecondModeration(replyId);
         } catch (e) {
@@ -587,6 +645,7 @@ export default function HomePage() {
     repliesByPost,
     postScoresById,
     replyScoresById,
+    nowTick,
   ]);
 
   useEffect(() => {
@@ -692,11 +751,15 @@ export default function HomePage() {
     setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
   };
 
-  const handleDeletePost = async (postId: number) => {
+  const handleDeletePost = async (
+    postId: number,
+    imageStoragePath?: string | null
+  ) => {
     if (!userId) return;
     const confirmed = window.confirm("この投稿を削除しますか？");
     if (!confirmed) return;
 
+    await removePostImageIfAny(supabase, imageStoragePath);
     const { error } = await supabase
       .from("posts")
       .delete()
@@ -716,7 +779,9 @@ export default function HomePage() {
   const handleSavePostEdit = async (postId: number) => {
     if (!userId) return;
     const content = editDraft.trim();
-    if (!content) {
+    const existing = posts.find((p) => p.id === postId);
+    const hasImage = Boolean(existing?.image_storage_path?.trim());
+    if (!content && !hasImage) {
       setErrorMessage("本文を入力してください。");
       return;
     }
@@ -827,11 +892,14 @@ export default function HomePage() {
         return;
       }
 
-      if (insertedReply && Object.keys(scores).length > 0) {
-        setReplyScoresById((prev) => ({
-          ...prev,
-          [insertedReply.id]: { first: scores },
-        }));
+      if (insertedReply) {
+        markReplyNeedsSecondModeration(insertedReply.id);
+        if (Object.keys(scores).length > 0) {
+          setReplyScoresById((prev) => ({
+            ...prev,
+            [insertedReply.id]: { first: scores },
+          }));
+        }
       }
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
@@ -931,56 +999,59 @@ export default function HomePage() {
   const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) return;
-    const content = draft.trim();
-    if (!content) return;
+    const textContent = draft.trim();
+    if (!textContent && !composeImageFile) return;
 
     setSubmitting(true);
     setErrorMessage(null);
 
     let postOverallMax = 0;
     let postScores: Record<string, number> = {};
-    const moderationRes = await fetch("/api/moderate", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        text: content,
-        mode: moderationMode,
-      }),
-    });
-    const moderationJson = (await moderationRes.json().catch(() => null)) as
-      | {
-          error?: string;
-          overallMax?: number;
-          degraded?: boolean;
-          paragraphs?: Array<{
-            scores?: Record<string, unknown>;
-          }>;
-        }
-      | null;
-    if (!moderationRes.ok) {
-      setErrorMessage(moderationJson?.error ?? "AI判定に失敗しました。");
-      setSubmitting(false);
-      return;
-    }
 
-    postScores = normalizePerspectiveScores(
-      moderationJson?.paragraphs?.[0]?.scores as
-        | Record<string, unknown>
-        | undefined
-    );
-    let maxFromApi =
-      typeof moderationJson?.overallMax === "number"
-        ? moderationJson.overallMax
-        : 0;
-    if (maxFromApi === 0 && Object.keys(postScores).length > 0) {
-      maxFromApi = Math.max(...Object.values(postScores));
+    if (textContent) {
+      const moderationRes = await fetch("/api/moderate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: textContent,
+          mode: moderationMode,
+        }),
+      });
+      const moderationJson = (await moderationRes.json().catch(() => null)) as
+        | {
+            error?: string;
+            overallMax?: number;
+            degraded?: boolean;
+            paragraphs?: Array<{
+              scores?: Record<string, unknown>;
+            }>;
+          }
+        | null;
+      if (!moderationRes.ok) {
+        setErrorMessage(moderationJson?.error ?? "AI判定に失敗しました。");
+        setSubmitting(false);
+        return;
+      }
+
+      postScores = normalizePerspectiveScores(
+        moderationJson?.paragraphs?.[0]?.scores as
+          | Record<string, unknown>
+          | undefined
+      );
+      let maxFromApi =
+        typeof moderationJson?.overallMax === "number"
+          ? moderationJson.overallMax
+          : 0;
+      if (maxFromApi === 0 && Object.keys(postScores).length > 0) {
+        maxFromApi = Math.max(...Object.values(postScores));
+      }
+      postOverallMax = maxFromApi;
     }
-    postOverallMax = maxFromApi;
 
     const { data: inserted, error } = await supabase
       .from("posts")
       .insert({
-        content,
+        content: textContent,
         user_id: userId,
         moderation_max_score: postOverallMax,
       })
@@ -993,7 +1064,40 @@ export default function HomePage() {
       return;
     }
 
-    if (inserted && Object.keys(postScores).length > 0) {
+    if (!inserted) {
+      setSubmitting(false);
+      return;
+    }
+
+    if (composeImageFile) {
+      const up = await uploadPostImage(
+        supabase,
+        userId,
+        inserted.id,
+        composeImageFile
+      );
+      if (!up.ok) {
+        await supabase.from("posts").delete().eq("id", inserted.id);
+        setErrorMessage(up.message);
+        setSubmitting(false);
+        return;
+      }
+      const { error: updErr } = await supabase
+        .from("posts")
+        .update({ image_storage_path: up.path })
+        .eq("id", inserted.id)
+        .eq("user_id", userId);
+      if (updErr) {
+        await removePostImageIfAny(supabase, up.path);
+        await supabase.from("posts").delete().eq("id", inserted.id);
+        setErrorMessage(updErr.message);
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    markPostNeedsSecondModeration(inserted.id);
+    if (Object.keys(postScores).length > 0) {
       setPostScoresById((prev) => ({
         ...prev,
         [inserted.id]: { first: postScores },
@@ -1001,6 +1105,7 @@ export default function HomePage() {
     }
 
     setDraft("");
+    setComposeImageFile(null);
     setComposeOpen(false);
     if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
       setToastMessage(POST_HIGH_TOXICITY_VISIBILITY_NOTICE);
@@ -1766,10 +1871,54 @@ export default function HomePage() {
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  placeholder="いまどうしてる？"
+                  placeholder="いまどうしてる？（画像のみでも投稿可）"
                   rows={3}
                   className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                 />
+                <div className="flex flex-col gap-2 text-sm text-gray-600">
+                  <label className="flex flex-wrap items-center gap-2">
+                    <span className="shrink-0">画像（任意・1枚・最大5MB）</span>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      disabled={submitting}
+                      className="max-w-full text-xs file:mr-2"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) {
+                          setComposeImageFile(null);
+                          return;
+                        }
+                        const msg = validatePostImageFile(file);
+                        if (msg) {
+                          setErrorMessage(msg);
+                          return;
+                        }
+                        setErrorMessage(null);
+                        setComposeImageFile(file);
+                      }}
+                    />
+                  </label>
+                  {composeImagePreviewUrl ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={composeImagePreviewUrl}
+                        alt=""
+                        className="max-h-40 rounded border border-gray-200 object-contain"
+                      />
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setComposeImageFile(null)}
+                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        画像を外す
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="submit"
@@ -1780,11 +1929,13 @@ export default function HomePage() {
                   </button>
                   <button
                     type="button"
+                    disabled={submitting}
                     onClick={() => {
                       setComposeOpen(false);
                       setDraft("");
+                      setComposeImageFile(null);
                     }}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                   >
                     キャンセル
                   </button>
@@ -1852,7 +2003,12 @@ export default function HomePage() {
                         ) : null}
                         <button
                           type="button"
-                          onClick={() => void handleDeletePost(post.id)}
+                          onClick={() =>
+                            void handleDeletePost(
+                              post.id,
+                              post.image_storage_path
+                            )
+                          }
                           className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
                         >
                           削除
@@ -1864,12 +2020,34 @@ export default function HomePage() {
                         ? new Date(post.created_at).toLocaleString()
                         : ""}
                     </div>
+                    {(() => {
+                      const postImg = getPostImagePublicUrl(
+                        supabase,
+                        post.image_storage_path
+                      );
+                      return postImg ? (
+                        <div className="mt-2 overflow-hidden rounded-md border border-gray-100 bg-gray-50">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={postImg}
+                            alt=""
+                            className="max-h-96 w-full object-contain"
+                            loading="lazy"
+                          />
+                        </div>
+                      ) : null;
+                    })()}
                     {editingPostId === post.id ? (
                       <div className="mt-1 space-y-2">
                         <textarea
                           value={editDraft}
                           onChange={(e) => setEditDraft(e.target.value)}
                           rows={5}
+                          placeholder={
+                            post.image_storage_path?.trim()
+                              ? "本文なしでも保存できます（画像のみ）"
+                              : undefined
+                          }
                           className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                           disabled={postEditSaving}
                         />
@@ -2036,7 +2214,15 @@ export default function HomePage() {
             <button
               type="button"
               disabled={interestConfirm != null}
-              onClick={() => setComposeOpen((prev) => !prev)}
+              onClick={() =>
+                setComposeOpen((prev) => {
+                  if (prev) {
+                    setDraft("");
+                    setComposeImageFile(null);
+                  }
+                  return !prev;
+                })
+              }
               className="fixed bottom-5 right-5 z-[10001] inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700 disabled:pointer-events-none disabled:opacity-30"
               aria-label="投稿フォームを開く"
               title="投稿"
