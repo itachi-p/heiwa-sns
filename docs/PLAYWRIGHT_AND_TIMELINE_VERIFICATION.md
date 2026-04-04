@@ -1,12 +1,14 @@
 # Playwright（E2E）とタイムライン検証
 
+**開発者向け**（E2E 方針・手動検証）。**数式・閾値の一覧**は重複を避け [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) を正とする。
+
 この文書は次の3つを兼ねる。
 
-1. **E2E テストに Playwright を使う方針**と、初めて触る人向けの最小手順  
-2. **「スキ」**（`user_affinity`）と **表示順** の設計の要約（外説明・リマインド用）  
+1. **E2E テストに Playwright を使う方針**と、初めて触る人向けの最小手順
+2. **「スキ」**（`user_affinity`）と **表示順** の設計の要約（外説明・リマインド用）
 3. **手動で順序を確かめる手順**（協力者テストや回帰確認用）
 
-実装の真実は常にコードである。数式・手順は **`app/page.tsx` の `fetchPosts` 内ソート** と **`lib/timeline-affinity.ts`** と照合すること。
+実装の真実は常にコードである。手順の根拠は **`app/page.tsx` の `fetchPosts`** と **`lib/timeline-sort.ts`** と **`dev/IMPLEMENTATION_REFERENCE.md`** を照合すること。
 
 ---
 
@@ -75,7 +77,7 @@
 
 ## 5. タイムラインの「表示順」の実装要約
 
-対象: **トップページ（`app/page.tsx`）のタイムライン**。データ取得後、次の順で処理される。
+対象: **トップページ（`app/page.tsx`）のタイムライン**。データ取得後、**攻撃性フィルタ** → **`sortTimelinePosts`**（`lib/timeline-sort.ts`）。
 
 ### 5.1 攻撃性フィルタ（非表示）
 
@@ -84,25 +86,10 @@
 
 ### 5.2 ソートキー（残った投稿の並び）
 
-各投稿について次を計算する。
+**要点のみ**（定数・式・`reply_toxic_events` の扱いはすべて [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) §1）:
 
-- **`base`**: `created_at` のエポック ms（古いほど小さい）。
-- **`toxicity_weight`（減衰）**: 閲覧者が「ターゲット」になった **`reply_toxic_events`**（過去 14 日、`app/page.tsx` の `RELATION_PENALTY_WINDOW_DAYS`）に、投稿者が actor として現れると **1 未満の乗数**が付く（複数イベントは乗数の **min**）。コード上は `0.5〜0.8` にクランプされた値から算出。
-- **`like_score`（スキ由来）**: 閲覧者の `from_user_id` で **`user_affinity`** を読み、投稿者 `user_id` への **`like_score`**（無ければ 0）。
-
-**最終スコア**（大きいほど上に来やすい）:
-
-```text
-final = base * toxicity_weight * (1 + affinityDisplayWeight(like_score))
-```
-
-`affinityDisplayWeight` は `lib/timeline-affinity.ts` の
-
-```text
-0.5 * (1 - exp(-0.3 * like_score))
-```
-
-**同点のとき**は **`created_at` が新しい方が先**（`tb - ta`）。
+- **主軸は `created_at`（ミリ秒）**: 新しい投稿が常に上。スキ由来の二次スコアは **同一タイムスタンプのタイブレーク**にのみ効く。
+- 手動検証「数分以内の2投稿でスキが効く」は、**DB 上 `created_at` が同一 ms** のときに限り相対順が変わる可能性がある（通常は時刻差で決まる）。
 
 ---
 
@@ -129,8 +116,8 @@ final = base * toxicity_weight * (1 + affinityDisplayWeight(like_score))
 2. **A** でトップを開き、**スキ前**の並びをメモする（上から B と C のどちらが先か）。
 3. **A** だけが **B の投稿に「スキ」** を付ける（C には付けない）。
 4. トップを **再読み込み** し、並びが変わるか確認する。  
-   - 期待: **B の投稿が相対的に上に来やすくなる**（`final` が大きくなる方向）。  
-   - 時刻差が大きいと `base` が支配的で変化が小さく見えることがあるので、「同時刻に近い」投稿ペアで試す。
+   - 期待: **同一 5 分スロット内**では B の投稿が相対的に上に来やすくなる（二次スコアの差）。  
+   - **スロットをまたいだ古い投稿**は、スキだけでは新しいスロットより上に来ない。
 
 **攻撃性フィルタの確認（別観点）**
 
@@ -138,14 +125,29 @@ final = base * toxicity_weight * (1 + affinityDisplayWeight(like_score))
 
 ---
 
-## 8. 関連ファイル（変更時のチェックリスト）
+## 8. 攻撃性テスト用5指標（1行目・2行目）のクライアント永続化
+
+**DB には max のみ**（`moderation_max_score`）。5指標の内訳は **DB 列を増やさず**、ブラウザ側で保持する。
+
+- **localStorage**（既存）に加え **IndexedDB**（`lib/moderation-scores-indexeddb.ts`）へも同一マップを保存し、再読み込み後も欠損しにくくする。
+- **1行目**: 投稿・返信送信時に `/api/moderate` の結果を state に載せ、上記ストレージへ同期。
+- **2行目**: 本文が編集窓内で確定したあと（`pending_content` が空）、かつ **投稿の `created_at` から 15 分経過後**（`lib/second-moderation-timing.ts`・`POST_EDIT_WINDOW_MS`）に、確定本文でもう一度 `/api/moderate` を叩いて埋める。新規投稿も `markPostNeedsSecondModeration` でキューに載せ、15 分後に同じ処理が走る。
+- 2行目を state にマージするときは **既存の 1 行目オブジェクトを潰さない**（`{ ...row, second }`）。
+
+変更時は `app/page.tsx` / `app/home/page.tsx` の second-moderation `useEffect`（依存に `nowTick` を含む）と `lib/pending-second-moderation.ts` を参照する。
+
+---
+
+## 9. 関連ファイル（変更時のチェックリスト）
 
 | 内容 | 主なファイル |
 |------|----------------|
+| 実装要約（数式・閾値の一覧） | `docs/dev/IMPLEMENTATION_REFERENCE.md` |
 | タイムライン取得・フィルタ・ソート | `app/page.tsx`（`fetchPosts`） |
-| スコア合成式 | `lib/timeline-affinity.ts` |
+| タイムライン並び（スロット＋二次スコア） | `lib/timeline-sort.ts` |
 | 閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | スキ RPC | `supabase/migrations/` 内 `user_affinity` / `apply_user_affinity_on_like` |
+| 5指標のクライアント保存・2行目タイミング | `lib/moderation-scores-indexeddb.ts`, `lib/second-moderation-timing.ts`, `lib/pending-second-moderation.ts` |
 | E2E 設定・サンプル | `playwright.config.ts`, `e2e/smoke.spec.ts` |
 
-設計思想の文章面は `docs/PRODUCT_PRINCIPLES.md` などと突き合わせる。
+設計思想の文章面は `docs/PRODUCT_PRINCIPLES.md` や `docs/INVITE_OVERVIEW.md` と突き合わせる。

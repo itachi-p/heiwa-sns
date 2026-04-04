@@ -52,6 +52,7 @@ import {
 import {
   POST_DEV_SCORES_KEY,
   REPLY_DEV_SCORES_KEY,
+  hydrateDevScoresFromIdb,
   loadDevScoresFromLocalStorage,
   mergeDevScoresById,
   parseRawToDevScores,
@@ -255,8 +256,8 @@ export default function Home() {
         idbLoadReplyDevScores(),
       ]);
       if (cancelled) return;
-      setPostScoresById((p) => mergeDevScoresById(fromPosts, p));
-      setReplyScoresById((p) => mergeDevScoresById(fromReplies, p));
+      setPostScoresById((p) => hydrateDevScoresFromIdb(p, fromPosts));
+      setReplyScoresById((p) => hydrateDevScoresFromIdb(p, fromReplies));
     })();
     return () => {
       cancelled = true;

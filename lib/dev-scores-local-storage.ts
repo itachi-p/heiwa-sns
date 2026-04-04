@@ -1,4 +1,4 @@
-/** テスト用5指標（DB には保存しない）。同一オリジンの localStorage — ログインユーザーに依存しない */
+/** テスト用5指標（DB には保存しない）。localStorage 本体＋バックアップ。アプリ側で IndexedDB も併用 */
 
 export const POST_DEV_SCORES_KEY = "heiwa_post_dev_five_scores_v1";
 export const REPLY_DEV_SCORES_KEY = "heiwa_reply_dev_five_scores_v1";
@@ -41,6 +41,37 @@ export function parseRawToDevScores(raw: string | null): DevScoresById {
   } catch {
     return {};
   }
+}
+
+/**
+ * IndexedDB など遅延ソースからの復元用。
+ * **既にメモリにある first/second は絶対に上書きしない**（IDB 完了が投稿より遅いとスコア表示が消えるのを防ぐ）。
+ */
+export function hydrateDevScoresFromIdb(
+  client: DevScoresById,
+  idb: DevScoresById
+): DevScoresById {
+  const ids = new Set(
+    [...Object.keys(client), ...Object.keys(idb)]
+      .map((k) => Number(k))
+      .filter(Number.isFinite)
+  );
+  const out: DevScoresById = { ...client };
+  for (const id of ids) {
+    const c = out[id];
+    const s = idb[id];
+    if (!c && !s) continue;
+    const row: DevFiveScores = { ...(c ?? {}) };
+    if (!hasScoresRecord(row.first) && hasScoresRecord(s?.first)) {
+      row.first = s!.first;
+    }
+    if (!hasScoresRecord(row.second) && hasScoresRecord(s?.second)) {
+      row.second = s!.second;
+    }
+    if (hasAnyScores(row)) out[id] = row;
+    else delete out[id];
+  }
+  return out;
 }
 
 export function mergeDevScoresById(
