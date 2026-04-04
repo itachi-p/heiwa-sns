@@ -45,9 +45,10 @@ import { partitionRepliesByParent } from "@/lib/reply-tree";
 import { sortTimelinePosts } from "@/lib/timeline-sort";
 import {
   getPostImagePublicUrl,
+  preparePostImageForUpload,
   removePostImageIfAny,
+  type PreparedPostImage,
   uploadPostImage,
-  validatePostImageFile,
 } from "@/lib/post-image-storage";
 import {
   POST_DEV_SCORES_KEY,
@@ -185,7 +186,8 @@ export default function Home() {
   const [blockThreshold, setBlockThreshold] = useState(0.7);
   const [composeOpen, setComposeOpen] = useState(false);
   const [postSubmitting, setPostSubmitting] = useState(false);
-  const [composeImageFile, setComposeImageFile] = useState<File | null>(null);
+  const [composePostImage, setComposePostImage] =
+    useState<PreparedPostImage | null>(null);
   const [composeImagePreviewUrl, setComposeImagePreviewUrl] = useState<
     string | null
   >(null);
@@ -226,16 +228,16 @@ export default function Home() {
   }, [toastMessage]);
 
   useEffect(() => {
-    if (!composeImageFile) {
+    if (!composePostImage) {
       setComposeImagePreviewUrl(null);
       return;
     }
-    const url = URL.createObjectURL(composeImageFile);
+    const url = URL.createObjectURL(composePostImage.blob);
     setComposeImagePreviewUrl(url);
     return () => {
       URL.revokeObjectURL(url);
     };
-  }, [composeImageFile]);
+  }, [composePostImage]);
 
   useEffect(() => {
     persistDevScoresToLocalStorage(POST_DEV_SCORES_KEY, postScoresById);
@@ -1111,7 +1113,7 @@ export default function Home() {
     }
     if (needsNickname) return;
     const textContent = input.trim();
-    if (!textContent && !composeImageFile) return;
+    if (!textContent && !composePostImage) return;
 
     setPostSubmitting(true);
     setErrorMessage(null);
@@ -1195,12 +1197,12 @@ export default function Home() {
       return;
     }
 
-    if (composeImageFile) {
+    if (composePostImage) {
       const up = await uploadPostImage(
         supabase,
         userId,
         data.id,
-        composeImageFile
+        composePostImage
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
@@ -1230,7 +1232,7 @@ export default function Home() {
       }));
     }
     setInput("");
-    setComposeImageFile(null);
+    setComposePostImage(null);
     setComposeOpen(false);
     if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
       setToastMessage(POST_HIGH_TOXICITY_VISIBILITY_NOTICE);
@@ -1431,35 +1433,39 @@ export default function Home() {
                   <textarea
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="いまどうしてる？（画像のみでも投稿可）"
+                    placeholder="いまどうしてる？"
                     rows={4}
                     className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                   />
-                  <div className="flex flex-col gap-2 text-sm text-gray-600">
-                    <label className="flex flex-wrap items-center gap-2">
-                      <span className="shrink-0">画像（任意・1枚・最大5MB）</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/gif"
-                        disabled={postSubmitting}
-                        className="max-w-full text-xs file:mr-2"
-                        onChange={(e) => {
+                  <div className="flex flex-col gap-2">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      disabled={postSubmitting}
+                      aria-label="画像を添付"
+                      className="max-w-full text-sm text-gray-800 file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-gray-500 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-800 hover:file:bg-gray-100"
+                      onChange={(e) => {
+                        void (async () => {
                           const file = e.target.files?.[0];
                           e.target.value = "";
                           if (!file) {
-                            setComposeImageFile(null);
+                            setComposePostImage(null);
                             return;
                           }
-                          const msg = validatePostImageFile(file);
-                          if (msg) {
-                            setErrorMessage(msg);
+                          const r = await preparePostImageForUpload(file);
+                          if (!r.ok) {
+                            setErrorMessage(r.message);
                             return;
                           }
                           setErrorMessage(null);
-                          setComposeImageFile(file);
-                        }}
-                      />
-                    </label>
+                          setComposePostImage({
+                            blob: r.blob,
+                            contentType: r.contentType,
+                            ext: r.ext,
+                          });
+                        })();
+                      }}
+                    />
                     {composeImagePreviewUrl ? (
                       <div className="flex flex-wrap items-end gap-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1471,7 +1477,7 @@ export default function Home() {
                         <button
                           type="button"
                           disabled={postSubmitting}
-                          onClick={() => setComposeImageFile(null)}
+                          onClick={() => setComposePostImage(null)}
                           className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                         >
                           画像を外す
@@ -1493,7 +1499,7 @@ export default function Home() {
                       onClick={() => {
                         setComposeOpen(false);
                         setInput("");
-                        setComposeImageFile(null);
+                        setComposePostImage(null);
                       }}
                       className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                     >
@@ -1631,11 +1637,6 @@ export default function Home() {
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
                         rows={5}
-                        placeholder={
-                          post.image_storage_path?.trim()
-                            ? "本文なしでも保存できます（画像のみ）"
-                            : undefined
-                        }
                         className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                         disabled={postEditSaving}
                       />
@@ -1845,7 +1846,7 @@ export default function Home() {
                   setComposeOpen((prev) => {
                     if (prev) {
                       setInput("");
-                      setComposeImageFile(null);
+                      setComposePostImage(null);
                     }
                     return !prev;
                   });
