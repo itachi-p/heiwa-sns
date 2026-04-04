@@ -168,7 +168,8 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   /** 数秒で消える通知（編集保存・注意など） */
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  type ToastState = { message: string; tone: "default" | "error" };
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
@@ -232,10 +233,10 @@ export default function Home() {
   }, [needsNickname]);
 
   useEffect(() => {
-    if (!toastMessage) return;
-    const t = window.setTimeout(() => setToastMessage(null), 4000);
+    if (!toast?.message?.trim()) return;
+    const t = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(t);
-  }, [toastMessage]);
+  }, [toast]);
 
   useEffect(() => {
     if (!composePostImage) {
@@ -305,9 +306,11 @@ export default function Home() {
       const post = posts.find((p) => p.id === editingPostId);
       if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
         setEditingPostId(null);
-        setToastMessage(
-          "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。"
-        );
+        setToast({
+          message:
+            "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。",
+          tone: "default",
+        });
       }
     }
     if (editingReplyId != null) {
@@ -315,9 +318,11 @@ export default function Home() {
       const reply = allReplies.find((r) => r.id === editingReplyId);
       if (reply && getEditRemainingMs(reply.created_at, nowTick) <= 0) {
         setEditingReplyId(null);
-        setToastMessage(
-          "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。"
-        );
+        setToast({
+          message:
+            "編集時間が終了しました。保存済みの内容は投稿から15分後に反映されます。",
+          tone: "default",
+        });
       }
     }
   }, [nowTick, editingPostId, editingReplyId, posts, repliesByPost]);
@@ -1076,7 +1081,10 @@ export default function Home() {
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
       if (overallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
-        setToastMessage(REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE);
+        setToast({
+          message: REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
+          tone: "default",
+        });
       }
       await fetchPosts();
     } catch (err) {
@@ -1107,7 +1115,10 @@ export default function Home() {
     if (!userId) return;
     const content = editReplyDraft.trim();
     if (!content) {
-      setErrorMessage("本文を入力してください。");
+      setToast({
+        message: "本文を入力してください。",
+        tone: "error",
+      });
       return;
     }
     setReplyEditSaving(true);
@@ -1119,12 +1130,15 @@ export default function Home() {
       .eq("user_id", userId);
     setReplyEditSaving(false);
     if (error) {
-      setErrorMessage(error.message);
+      setToast({ message: error.message, tone: "error" });
       return;
     }
     setEditingReplyId(null);
     markReplyNeedsSecondModeration(replyId);
-    setToastMessage("編集を保存しました。15分後に反映されます。");
+    setToast({
+      message: "編集を保存しました。15分後に反映されます。",
+      tone: "default",
+    });
     await fetchPosts();
   };
 
@@ -1155,11 +1169,12 @@ export default function Home() {
     const existing = posts.find((p) => p.id === postId);
     const hasImage = Boolean(existing?.image_storage_path?.trim());
     if (!content) {
-      setErrorMessage(
-        hasImage
+      setToast({
+        message: hasImage
           ? "画像を付けた投稿には本文が必要です。本文を入力してください。"
-          : "本文を入力してください。"
-      );
+          : "本文を入力してください。",
+        tone: "error",
+      });
       return;
     }
     setPostEditSaving(true);
@@ -1171,12 +1186,15 @@ export default function Home() {
       .eq("user_id", userId);
     setPostEditSaving(false);
     if (error) {
-      setErrorMessage(error.message);
+      setToast({ message: error.message, tone: "error" });
       return;
     }
     setEditingPostId(null);
     markPostNeedsSecondModeration(postId);
-    setToastMessage("編集を保存しました。15分後に反映されます。");
+    setToast({
+      message: "編集を保存しました。15分後に反映されます。",
+      tone: "default",
+    });
     await fetchPosts();
   };
 
@@ -1319,7 +1337,10 @@ export default function Home() {
     setComposePostImage(null);
     setComposeOpen(false);
     if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
-      setToastMessage(POST_HIGH_TOXICITY_VISIBILITY_NOTICE);
+      setToast({
+        message: POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
+        tone: "default",
+      });
     }
     await fetchPosts();
     setPostSubmitting(false);
@@ -1987,13 +2008,18 @@ export default function Home() {
         errorMessage={nicknameModalError}
       />
 
-      {toastMessage?.trim() ? (
+      {toast?.message?.trim() ? (
         <div
-          className="pointer-events-none fixed bottom-24 left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border border-gray-200 bg-gray-900 px-4 py-2.5 text-center text-sm text-white shadow-lg"
-          role="status"
-          aria-live="polite"
+          className={[
+            "pointer-events-none fixed bottom-24 left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg px-4 py-2.5 text-center text-sm shadow-lg",
+            toast.tone === "error"
+              ? "border border-red-400/80 bg-red-950 text-red-50"
+              : "border border-gray-200 bg-gray-900 text-white",
+          ].join(" ")}
+          role={toast.tone === "error" ? "alert" : "status"}
+          aria-live={toast.tone === "error" ? "assertive" : "polite"}
         >
-          {toastMessage}
+          {toast.message}
         </div>
       ) : null}
 
