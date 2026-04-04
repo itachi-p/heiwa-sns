@@ -193,6 +193,8 @@ export default function Home() {
   const [blockOnSubmit, setBlockOnSubmit] = useState(false);
   const [blockThreshold, setBlockThreshold] = useState(0.7);
   const [composeOpen, setComposeOpen] = useState(false);
+  /** 投稿フローティングフォーム内のみ（背後のタイムラインに出さない） */
+  const [composeFormError, setComposeFormError] = useState<string | null>(null);
   const [postSubmitting, setPostSubmitting] = useState(false);
   const [composePostImage, setComposePostImage] =
     useState<PreparedPostImage | null>(null);
@@ -1181,19 +1183,19 @@ export default function Home() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) {
-      setErrorMessage("ログインしてください。");
+      setComposeFormError("ログインしてください。");
       return;
     }
     if (needsNickname) return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
-      setErrorMessage("画像を添付する場合は本文を入力してください。");
+      setComposeFormError("画像を添付する場合は本文を入力してください。");
       return;
     }
 
     setPostSubmitting(true);
-    setErrorMessage(null);
+    setComposeFormError(null);
 
     let postOverallMax = 0;
     let postScores: Record<string, number> = {};
@@ -1223,7 +1225,7 @@ export default function Home() {
           degradedReason?: string;
         };
         if (!res.ok) {
-          setErrorMessage(json?.error ?? "AI判定に失敗しました。");
+          setComposeFormError(json?.error ?? "AI判定に失敗しました。");
           setPostSubmitting(false);
           return;
         }
@@ -1246,7 +1248,7 @@ export default function Home() {
         postOverallMax = maxFromApi;
       } catch (err) {
         console.error("moderation error:", err);
-        setErrorMessage("AI判定に失敗しました。");
+        setComposeFormError("AI判定に失敗しました。");
         setPostSubmitting(false);
         return;
       }
@@ -1268,7 +1270,7 @@ export default function Home() {
 
     if (error) {
       console.error("insert error:", error);
-      setErrorMessage(error.message);
+      setComposeFormError(error.message);
       setPostSubmitting(false);
       return;
     }
@@ -1287,7 +1289,7 @@ export default function Home() {
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
-        setErrorMessage(up.message);
+        setComposeFormError(up.message);
         setPostSubmitting(false);
         return;
       }
@@ -1299,7 +1301,7 @@ export default function Home() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", data.id);
-        setErrorMessage(updErr.message);
+        setComposeFormError(updErr.message);
         setPostSubmitting(false);
         return;
       }
@@ -1312,6 +1314,7 @@ export default function Home() {
         [data.id]: { first: postScores },
       }));
     }
+    setComposeFormError(null);
     setInput("");
     setComposePostImage(null);
     setComposeOpen(false);
@@ -1450,6 +1453,14 @@ export default function Home() {
                   onSubmit={handleSubmit}
                   className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
                 >
+                  {composeFormError?.trim() ? (
+                    <div
+                      className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800"
+                      role="alert"
+                    >
+                      {composeFormError}
+                    </div>
+                  ) : null}
                   <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
                     <summary className="cursor-pointer text-sm font-medium text-gray-800">
                       AI判定（テスト用）
@@ -1535,10 +1546,10 @@ export default function Home() {
                           }
                           const r = await preparePostImageForUpload(file);
                           if (!r.ok) {
-                            setErrorMessage(r.message);
+                            setComposeFormError(r.message);
                             return;
                           }
-                          setErrorMessage(null);
+                          setComposeFormError(null);
                           setComposePostImage({
                             blob: r.blob,
                             contentType: r.contentType,
@@ -1579,6 +1590,7 @@ export default function Home() {
                       disabled={postSubmitting}
                       onClick={() => {
                         setComposeOpen(false);
+                        setComposeFormError(null);
                         setInput("");
                         setComposePostImage(null);
                       }}
@@ -1926,8 +1938,11 @@ export default function Home() {
                   if (!tryInteraction()) return;
                   setComposeOpen((prev) => {
                     if (prev) {
+                      setComposeFormError(null);
                       setInput("");
                       setComposePostImage(null);
+                    } else {
+                      setComposeFormError(null);
                     }
                     return !prev;
                   });

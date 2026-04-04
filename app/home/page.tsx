@@ -188,6 +188,7 @@ export default function HomePage() {
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [composeFormError, setComposeFormError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [composePostImage, setComposePostImage] =
     useState<PreparedPostImage | null>(null);
@@ -1076,12 +1077,12 @@ export default function HomePage() {
     const textContent = draft.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
-      setErrorMessage("画像を添付する場合は本文を入力してください。");
+      setComposeFormError("画像を添付する場合は本文を入力してください。");
       return;
     }
 
     setSubmitting(true);
-    setErrorMessage(null);
+    setComposeFormError(null);
 
     let postOverallMax = 0;
     let postScores: Record<string, number> = {};
@@ -1106,7 +1107,7 @@ export default function HomePage() {
           }
         | null;
       if (!moderationRes.ok) {
-        setErrorMessage(moderationJson?.error ?? "AI判定に失敗しました。");
+        setComposeFormError(moderationJson?.error ?? "AI判定に失敗しました。");
         setSubmitting(false);
         return;
       }
@@ -1141,7 +1142,7 @@ export default function HomePage() {
       .single();
 
     if (error) {
-      setErrorMessage(error.message);
+      setComposeFormError(error.message);
       setSubmitting(false);
       return;
     }
@@ -1160,7 +1161,7 @@ export default function HomePage() {
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", inserted.id);
-        setErrorMessage(up.message);
+        setComposeFormError(up.message);
         setSubmitting(false);
         return;
       }
@@ -1172,7 +1173,7 @@ export default function HomePage() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", inserted.id);
-        setErrorMessage(updErr.message);
+        setComposeFormError(updErr.message);
         setSubmitting(false);
         return;
       }
@@ -1186,6 +1187,7 @@ export default function HomePage() {
       }));
     }
 
+    setComposeFormError(null);
     setDraft("");
     setComposePostImage(null);
     setComposeOpen(false);
@@ -1889,6 +1891,14 @@ export default function HomePage() {
                   onSubmit={handleSubmitPost}
                   className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
                 >
+                {composeFormError?.trim() ? (
+                  <div
+                    className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800"
+                    role="alert"
+                  >
+                    {composeFormError}
+                  </div>
+                ) : null}
                 <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
                   <summary className="cursor-pointer text-sm font-medium text-gray-800">
                     AI判定（テスト用）
@@ -1974,10 +1984,10 @@ export default function HomePage() {
                         }
                         const r = await preparePostImageForUpload(file);
                         if (!r.ok) {
-                          setErrorMessage(r.message);
+                          setComposeFormError(r.message);
                           return;
                         }
-                        setErrorMessage(null);
+                        setComposeFormError(null);
                         setComposePostImage({
                           blob: r.blob,
                           contentType: r.contentType,
@@ -2018,6 +2028,7 @@ export default function HomePage() {
                     disabled={submitting}
                     onClick={() => {
                       setComposeOpen(false);
+                      setComposeFormError(null);
                       setDraft("");
                       setComposePostImage(null);
                     }}
@@ -2298,8 +2309,11 @@ export default function HomePage() {
               onClick={() =>
                 setComposeOpen((prev) => {
                   if (prev) {
+                    setComposeFormError(null);
                     setDraft("");
                     setComposePostImage(null);
+                  } else {
+                    setComposeFormError(null);
                   }
                   return !prev;
                 })
