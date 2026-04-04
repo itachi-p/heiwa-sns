@@ -125,16 +125,15 @@
 
 ---
 
-## 8. 攻撃性テスト用5指標（1行目・2行目）のクライアント永続化
+## 8. 攻撃性テスト用5指標（1行目・2行目）の永続化
 
-**DB には max のみ**（`moderation_max_score`）。5指標の内訳は **DB 列を増やさず**、ブラウザ側で保持する。
+**閲覧フィルタは `moderation_max_score` のみ**。5 指標の内訳は **`moderation_dev_scores`（jsonb）** に保存し、Vercel / ローカル / 他ユーザーでも同じ一覧取得で表示できる。
 
-- **localStorage**（既存）に加え **IndexedDB**（`lib/moderation-scores-indexeddb.ts`）へも同一マップを保存し、再読み込み後も欠損しにくくする。
-- **1行目**: 投稿・返信送信時に `/api/moderate` の結果を state に載せ、上記ストレージへ同期。
-- **2行目**: 本文が編集窓内で確定したあと（`pending_content` が空）、かつ **投稿の `created_at` から 15 分経過後**（`lib/second-moderation-timing.ts`・`POST_EDIT_WINDOW_MS`）に、確定本文でもう一度 `/api/moderate` を叩いて埋める。新規投稿も `markPostNeedsSecondModeration` でキューに載せ、15 分後に同じ処理が走る。
-- 2行目を state にマージするときは **既存の 1 行目オブジェクトを潰さない**（`{ ...row, second }`）。
+- **1行目**: 投稿・返信 insert 時に `moderation_dev_scores.first` を書く。
+- **2行目**: `pending_content` が空かつ **投稿・返信の `created_at` から 15 分後**に、確定本文で `/api/moderate` を叩き、`/api/persist-moderation-dev-scores`（要 `SUPABASE_SERVICE_ROLE_KEY`）で `second` を保存。pending を **サーバーで確定した場合**は `finalize-pending-edits-core` が `second` をマージ。
+- **localStorage / IndexedDB** はキャッシュ。IDB 復元が終わるまで空マップを IDB に書かない（表示が一瞬消える対策）。
 
-変更時は `app/page.tsx` / `app/home/page.tsx` の second-moderation `useEffect`（依存に `nowTick` を含む）と `lib/pending-second-moderation.ts` を参照する。
+変更時は `app/page.tsx` / `app/home/page.tsx` の `fetchPosts` / `fetchOwnPosts` の DB マージ、`persist-moderation-dev-scores`、second-moderation `useEffect`、`lib/pending-second-moderation.ts` を参照する。
 
 ---
 
@@ -147,7 +146,7 @@
 | タイムライン並び（スロット＋二次スコア） | `lib/timeline-sort.ts` |
 | 閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | スキ RPC | `supabase/migrations/` 内 `user_affinity` / `apply_user_affinity_on_like` |
-| 5指標のクライアント保存・2行目タイミング | `lib/moderation-scores-indexeddb.ts`, `lib/second-moderation-timing.ts`, `lib/pending-second-moderation.ts` |
+| 5指標の DB 保存・2行目・キャッシュ | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/second-moderation-timing.ts`, `lib/pending-second-moderation.ts` |
 | E2E 設定・サンプル | `playwright.config.ts`, `e2e/smoke.spec.ts` |
 
 設計思想の文章面は `docs/PRODUCT_PRINCIPLES.md` や `docs/INVITE_OVERVIEW.md` と突き合わせる。

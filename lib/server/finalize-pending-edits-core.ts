@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  mergeModerationDevScoresPatch,
+  moderationDevScoresFromJsonb,
+} from "@/lib/moderation-dev-scores-db";
 import { analyzeTextModeration } from "@/lib/server/moderation";
 import { POST_EDIT_WINDOW_MS } from "@/lib/post-edit-window";
 
@@ -18,7 +22,7 @@ export async function finalizePendingPostsAndReplies(
 
   let postsQuery = admin
     .from("posts")
-    .select("id, pending_content")
+    .select("id, pending_content, moderation_dev_scores")
     .lte("created_at", cutoff)
     .not("pending_content", "is", null);
   if (uid) postsQuery = postsQuery.eq("user_id", uid);
@@ -34,12 +38,19 @@ export async function finalizePendingPostsAndReplies(
       continue;
     }
     const moderation = await analyzeTextModeration(next, "perspective");
+    const prevScores = moderationDevScoresFromJsonb(
+      (p as { moderation_dev_scores?: unknown }).moderation_dev_scores
+    );
+    const mergedScores = mergeModerationDevScoresPatch(prevScores, {
+      second: moderation.scores,
+    });
     await admin
       .from("posts")
       .update({
         content: next,
         moderation_max_score: moderation.overallMax,
         pending_content: null,
+        moderation_dev_scores: mergedScores,
       })
       .eq("id", p.id);
     finalizedPosts += 1;
@@ -47,7 +58,7 @@ export async function finalizePendingPostsAndReplies(
 
   let repliesQuery = admin
     .from("post_replies")
-    .select("id, pending_content")
+    .select("id, pending_content, moderation_dev_scores")
     .lte("created_at", cutoff)
     .not("pending_content", "is", null);
   if (uid) repliesQuery = repliesQuery.eq("user_id", uid);
@@ -63,12 +74,19 @@ export async function finalizePendingPostsAndReplies(
       continue;
     }
     const moderation = await analyzeTextModeration(next, "perspective");
+    const rprevScores = moderationDevScoresFromJsonb(
+      (r as { moderation_dev_scores?: unknown }).moderation_dev_scores
+    );
+    const rmergedScores = mergeModerationDevScoresPatch(rprevScores, {
+      second: moderation.scores,
+    });
     await admin
       .from("post_replies")
       .update({
         content: next,
         moderation_max_score: moderation.overallMax,
         pending_content: null,
+        moderation_dev_scores: rmergedScores,
       })
       .eq("id", r.id);
     finalizedReplies += 1;

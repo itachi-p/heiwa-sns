@@ -6,13 +6,13 @@
 
 1. **`supabase/migrations/` に SQL を足す・既存ファイルを書き換える**のは、**プロジェクトオーナーがそのタスクで明示したときだけ**。
 2. 新しいマイグレーションを入れたら **`docs/schema.md` を同じコミットで更新**する（列の追加・削除・型変更をここに反映）。
-3. **方針で禁止されている列**（例: 投稿に5指標JSONを永続保存する列）を提案しない。方針変更が必要なら、**先に文章で合意**してからマイグレーション案を書く。
+3. スキーマ方針を変える列は、**オーナー合意とマイグレーション**のセットで入れる（既存マイグレーションの書き換えはしない）。
 4. 適用済みマイグレーションファイルの**中身を後から書き換えない**（履歴が壊れる）。訂正は新しいマイグレーションで行う。
 
 ## 方針メモ（モデレーション）
 
-- **DBに持つのは toxicity の max（0〜1）のみ**（`posts.moderation_max_score` / `post_replies.moderation_max_score`）。初回投稿時と、15分編集確定時の上書きで更新。
-- **Perspective の5指標そのものは DB に保存しない**。1行目は投稿送信時の `/api/moderate` 結果を `postScoresById` / `replyScoresById` と dev用 localStorage に保持。編集保存時は `lib/pending-second-moderation` の localStorage フラグで「2行目が未取得」を記録し、**確定後（`pending_content` が消えたあと）** に同じ本文で `/api/moderate` をもう一度呼び 2 行目を埋める（**他端末・未ログインユーザーには 2 行目は共有されない**）。
+- **閲覧フィルタに使うのは toxicity の max（0〜1）のみ**（`posts.moderation_max_score` / `post_replies.moderation_max_score`）。初回投稿時と、15分編集確定時の上書きで更新。
+- **開発用の Perspective 5 指標（1行目・2行目）**は `moderation_dev_scores`（jsonb、任意）に保存する。1行目は投稿・返信 insert 時、2行目は編集窓経過後のクライアント再採点＋`/api/persist-moderation-dev-scores`、または pending 確定処理（`finalize-pending-edits-core`）で追記。一覧取得で全員が読める。localStorage / IndexedDB はキャッシュ。
 
 ---
 
@@ -44,7 +44,8 @@
 | created_at | timestamptz | |
 | user_id | uuid | |
 | pending_content | text | 15分編集窓の未確定本文 |
-| moderation_max_score | real | 0〜1、**5指標フルは持たない** |
+| moderation_max_score | real | 0〜1（フィルタ用） |
+| moderation_dev_scores | jsonb | 任意。開発表示用 `{ "first": {ATTR: score}, "second": {...} }` |
 | image_storage_path | text | 任意。Storage **`post-images`** バケット内パス（`{user_id}/{post_id}.{ext}`） |
 
 ### Storage（投稿画像）
@@ -70,7 +71,8 @@
 | created_at | timestamptz | |
 | parent_reply_id | bigint | スレッド用、マイグレーション参照 |
 | pending_content | text | 編集未確定 |
-| moderation_max_score | real | 0〜1 |
+| moderation_max_score | real | 0〜1（フィルタ用） |
+| moderation_dev_scores | jsonb | 任意。開発表示用 `{ "first", "second" }` |
 
 ### `public.interest_tags` / `public.user_interests`
 
@@ -99,3 +101,4 @@
 | 2026-04-02 | 初版作成。マイグレーションから集約。 |
 | 2026-04-05 | `user_affinity`・スキ由来タイムライン優先度。 |
 | 2026-04-10 | `posts.image_storage_path`・バケット `post-images`。 |
+| 2026-04-11 | `posts` / `post_replies` に `moderation_dev_scores`（jsonb）。 |

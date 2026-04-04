@@ -59,6 +59,8 @@ import {
   parseRawToDevScores,
   persistDevScoresToLocalStorage,
 } from "@/lib/dev-scores-local-storage";
+import { buildDevScoresByIdFromRows } from "@/lib/moderation-dev-scores-db";
+import { persistModerationDevScores } from "@/lib/persist-moderation-dev-scores-client";
 import {
   idbLoadPostDevScores,
   idbLoadReplyDevScores,
@@ -85,6 +87,8 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
+  /** 開発用5指標（DB）。閲覧フィルタは moderation_max_score のみ */
+  moderation_dev_scores?: unknown;
   image_storage_path?: string | null;
   /** 表示用（posts には保存せず users から解決） */
   users?: {
@@ -106,6 +110,7 @@ type PostReply = {
   created_at?: string;
   parent_reply_id?: number | null;
   moderation_max_score?: number;
+  moderation_dev_scores?: unknown;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -155,6 +160,9 @@ export default function Home() {
   const [replyScoresById, setReplyScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(REPLY_DEV_SCORES_KEY)
   );
+  /** IDB 復元前に空状態を IDB へ書かない（表示が一瞬消える原因の一つ） */
+  const [scoresPersistenceEnabled, setScoresPersistenceEnabled] =
+    useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [input, setInput] = useState("");
@@ -240,14 +248,16 @@ export default function Home() {
   }, [composePostImage]);
 
   useEffect(() => {
+    if (!scoresPersistenceEnabled) return;
     persistDevScoresToLocalStorage(POST_DEV_SCORES_KEY, postScoresById);
     void idbSavePostDevScores(postScoresById);
-  }, [postScoresById]);
+  }, [postScoresById, scoresPersistenceEnabled]);
 
   useEffect(() => {
+    if (!scoresPersistenceEnabled) return;
     persistDevScoresToLocalStorage(REPLY_DEV_SCORES_KEY, replyScoresById);
     void idbSaveReplyDevScores(replyScoresById);
-  }, [replyScoresById]);
+  }, [replyScoresById, scoresPersistenceEnabled]);
 
   /** IndexedDB をマージ（localStorage 初期値より欠損しにくい） */
   useEffect(() => {
@@ -260,6 +270,7 @@ export default function Home() {
       if (cancelled) return;
       setPostScoresById((p) => hydrateDevScoresFromIdb(p, fromPosts));
       setReplyScoresById((p) => hydrateDevScoresFromIdb(p, fromReplies));
+      setScoresPersistenceEnabled(true);
     })();
     return () => {
       cancelled = true;
@@ -456,6 +467,7 @@ export default function Home() {
     setPosts(timelinePosts);
 
     const postIds = timelinePosts.map((p) => p.id);
+    let replyRowsFlat: PostReply[] = [];
     if (postIds.length === 0) {
       setRepliesByPost({});
     } else {
@@ -525,6 +537,18 @@ export default function Home() {
         byPost[r.post_id] = arr;
       }
       setRepliesByPost(byPost);
+      replyRowsFlat = Object.values(byPost).flat();
+    }
+
+    const postScoresFromDb = buildDevScoresByIdFromRows(timelinePosts);
+    const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
+    setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
+    setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
+    for (const pid of loadPostIdsPendingSecondModeration()) {
+      if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
+    }
+    for (const rid of loadReplyIdsPendingSecondModeration()) {
+      if (replyScoresFromDb[rid]?.second) removeReplyNeedsSecondModeration(rid);
     }
 
     setErrorMessage(null);
@@ -578,7 +602,7 @@ export default function Home() {
     hadPendingContentRef.current = hasPendingContent;
   }, [authReady, hasPendingContent]);
 
-  /** 本文確定後かつ編集窓終了後、確定本文で /api/moderate を1回叩いて2行目を埋める（永続は localStorage + IndexedDB のみ） */
+  /** 本文確定後かつ編集窓終了後、確定本文で再採点し 2 行目を DB（moderation_dev_scores）へ保存 */
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
@@ -600,7 +624,24 @@ export default function Home() {
         }
 
         const prev = postScoresByIdRef.current;
-        if (prev[postId]?.second) continue;
+        const existingSecond = prev[postId]?.second;
+        if (existingSecond && Object.keys(existingSecond).length > 0) {
+          const busyKey = `p:${postId}`;
+          if (secondModerationBusyRef.current.has(busyKey)) continue;
+          secondModerationBusyRef.current.add(busyKey);
+          try {
+            const persistRes = await persistModerationDevScores({
+              postId,
+              patch: { second: existingSecond },
+            });
+            if (persistRes.ok) removePostNeedsSecondModeration(postId);
+          } catch (e) {
+            console.warn("persist second post:", e);
+          } finally {
+            secondModerationBusyRef.current.delete(busyKey);
+          }
+          continue;
+        }
 
         const busyKey = `p:${postId}`;
         if (secondModerationBusyRef.current.has(busyKey)) continue;
@@ -622,7 +663,11 @@ export default function Home() {
             const row = p[postId] ?? {};
             return { ...p, [postId]: { ...row, second: scores } };
           });
-          removePostNeedsSecondModeration(postId);
+          const persistRes = await persistModerationDevScores({
+            postId,
+            patch: { second: scores },
+          });
+          if (persistRes.ok) removePostNeedsSecondModeration(postId);
         } catch (e) {
           console.warn("second moderation row:", e);
         } finally {
@@ -647,8 +692,25 @@ export default function Home() {
           continue;
         }
 
-        const prev = replyScoresByIdRef.current;
-        if (prev[replyId]?.second) continue;
+        const rprev = replyScoresByIdRef.current;
+        const rExistingSecond = rprev[replyId]?.second;
+        if (rExistingSecond && Object.keys(rExistingSecond).length > 0) {
+          const busyKey = `r:${replyId}`;
+          if (secondModerationBusyRef.current.has(busyKey)) continue;
+          secondModerationBusyRef.current.add(busyKey);
+          try {
+            const persistRes = await persistModerationDevScores({
+              replyId,
+              patch: { second: rExistingSecond },
+            });
+            if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
+          } catch (e) {
+            console.warn("persist second reply:", e);
+          } finally {
+            secondModerationBusyRef.current.delete(busyKey);
+          }
+          continue;
+        }
 
         const busyKey = `r:${replyId}`;
         if (secondModerationBusyRef.current.has(busyKey)) continue;
@@ -670,7 +732,11 @@ export default function Home() {
             const row = p[replyId] ?? {};
             return { ...p, [replyId]: { ...row, second: scores } };
           });
-          removeReplyNeedsSecondModeration(replyId);
+          const persistRes = await persistModerationDevScores({
+            replyId,
+            patch: { second: scores },
+          });
+          if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
         } catch (e) {
           console.warn("second moderation row (reply):", e);
         } finally {
@@ -947,11 +1013,14 @@ export default function Home() {
         content: string;
         parent_reply_id?: number;
         moderation_max_score: number;
+        moderation_dev_scores: { first: Record<string, number> } | null;
       } = {
         post_id: postId,
         user_id: userId,
         content,
         moderation_max_score: overallMax,
+        moderation_dev_scores:
+          Object.keys(scores).length > 0 ? { first: scores } : null,
       };
       if (parentReplyId != null) {
         insertRow.parent_reply_id = parentReplyId;
@@ -1181,6 +1250,10 @@ export default function Home() {
         content: textContent,
         user_id: userId,
         moderation_max_score: postOverallMax,
+        moderation_dev_scores:
+          Object.keys(postScores).length > 0
+            ? { first: postScores }
+            : null,
       })
       .select()
       .single();

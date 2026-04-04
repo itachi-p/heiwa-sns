@@ -1,6 +1,7 @@
 /**
- * 編集保存後、確定した本文に対する「2行目」の5指標を取りにいくためのフラグ。
- * DB には保存しない。sessionStorage ではタブを閉じると消えるため localStorage を使う。
+ * 「2行目」の5指標を取りにいくためのキュー（投稿ID / 返信ID）。
+ * 新規投稿・新規返信でも登録し、編集窓（15分）経過後かつ本文確定後に再採点し
+ * `moderation_dev_scores.second` へ保存するまで localStorage で追跡する。
  */
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
 

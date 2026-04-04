@@ -37,7 +37,7 @@ secondary = affinity * toxicity_soft + own_boost
 
 **第3キー**: `id` 降順（安定化）。
 
-**5 指標の開発用表示**（localStorage / IndexedDB）: IDB の遅延読み込みは **`hydrateDevScoresFromIdb`** で行い、**既にメモリにある first/second は上書きしない**（`lib/dev-scores-local-storage.ts`）。
+**5 指標の開発用表示**: **正は DB** の `moderation_dev_scores`（`{ first, second }`）。一覧取得時に `mergeDevScoresById` で state に載せる。localStorage / IndexedDB はオフライン・別タブ用のキャッシュ。IDB 復元前は **空 state を IDB に書かない**（`scoresPersistenceEnabled`）。2 行目は編集窓経過後に `/api/persist-moderation-dev-scores`（service role）または pending 確定の `finalize-pending-edits-core` で保存。
 
 ---
 
@@ -59,8 +59,8 @@ secondary = affinity * toxicity_soft + own_boost
 
 ## 4. モデレーションスコアの保存方針
 
-- **DB に永続するのは `moderation_max_score`（0〜1）のみ**（投稿・返信）。
-- Perspective **5 指標の内訳は DB に載せない**。クライアントの localStorage / IndexedDB 等（[`../PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`](../PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md) §8 参照）。
+- **閲覧フィルタに使うのは `moderation_max_score`（0〜1）のみ**（投稿・返信）。
+- **開発用 5 指標**は `moderation_dev_scores`（jsonb、任意）に `{ first, second }` で保存し、**全クライアントで共有**。フィルタ・公開ランキングには使わない。補助キャッシュは localStorage / IndexedDB（[`../PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`](../PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md) 参照）。
 
 ---
 
@@ -72,6 +72,6 @@ secondary = affinity * toxicity_soft + own_boost
 | 並び純関数 | `lib/timeline-sort.ts` |
 | 毒性閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | 匿名時の閾値 | `lib/timeline-threshold.ts` |
-| 5 指標クライアント保持 | `lib/moderation-scores-indexeddb.ts`, `lib/pending-second-moderation.ts`, `lib/second-moderation-timing.ts` |
+| 5 指標（DB + キャッシュ） | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/persist-moderation-dev-scores-client.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/pending-second-moderation.ts`, `lib/second-moderation-timing.ts` |
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |

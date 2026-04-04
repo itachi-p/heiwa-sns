@@ -57,6 +57,8 @@ import {
   parseRawToDevScores,
   persistDevScoresToLocalStorage,
 } from "@/lib/dev-scores-local-storage";
+import { buildDevScoresByIdFromRows } from "@/lib/moderation-dev-scores-db";
+import { persistModerationDevScores } from "@/lib/persist-moderation-dev-scores-client";
 import {
   idbLoadPostDevScores,
   idbLoadReplyDevScores,
@@ -85,6 +87,7 @@ type Post = {
   created_at?: string;
   user_id?: string;
   moderation_max_score?: number;
+  moderation_dev_scores?: unknown;
   image_storage_path?: string | null;
   users?: {
     nickname: string | null;
@@ -102,6 +105,7 @@ type PostReply = {
   created_at?: string;
   parent_reply_id?: number | null;
   moderation_max_score?: number;
+  moderation_dev_scores?: unknown;
   users?: {
     nickname: string | null;
     avatar_url?: string | null;
@@ -150,6 +154,8 @@ export default function HomePage() {
   const [replyScoresById, setReplyScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(REPLY_DEV_SCORES_KEY)
   );
+  const [scoresPersistenceEnabled, setScoresPersistenceEnabled] =
+    useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [bioDraft, setBioDraft] = useState("");
   const [presetRows, setPresetRows] = useState<InterestPick[]>([]);
@@ -243,14 +249,16 @@ export default function HomePage() {
   }, [composePostImage]);
 
   useEffect(() => {
+    if (!scoresPersistenceEnabled) return;
     persistDevScoresToLocalStorage(POST_DEV_SCORES_KEY, postScoresById);
     void idbSavePostDevScores(postScoresById);
-  }, [postScoresById]);
+  }, [postScoresById, scoresPersistenceEnabled]);
 
   useEffect(() => {
+    if (!scoresPersistenceEnabled) return;
     persistDevScoresToLocalStorage(REPLY_DEV_SCORES_KEY, replyScoresById);
     void idbSaveReplyDevScores(replyScoresById);
-  }, [replyScoresById]);
+  }, [replyScoresById, scoresPersistenceEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,6 +270,7 @@ export default function HomePage() {
       if (cancelled) return;
       setPostScoresById((p) => hydrateDevScoresFromIdb(p, fromPosts));
       setReplyScoresById((p) => hydrateDevScoresFromIdb(p, fromReplies));
+      setScoresPersistenceEnabled(true);
     })();
     return () => {
       cancelled = true;
@@ -404,6 +413,7 @@ export default function HomePage() {
     }));
 
     const postIds = merged.map((p) => p.id);
+    let replyRowsFlat: PostReply[] = [];
     if (postIds.length === 0) {
       setRepliesByPost({});
     } else {
@@ -473,6 +483,18 @@ export default function HomePage() {
         byPost[r.post_id] = arr;
       }
       setRepliesByPost(byPost);
+      replyRowsFlat = Object.values(byPost).flat();
+    }
+
+    const postScoresFromDb = buildDevScoresByIdFromRows(merged);
+    const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
+    setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
+    setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
+    for (const pid of loadPostIdsPendingSecondModeration()) {
+      if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
+    }
+    for (const rid of loadReplyIdsPendingSecondModeration()) {
+      if (replyScoresFromDb[rid]?.second) removeReplyNeedsSecondModeration(rid);
     }
 
     setPosts(merged);
@@ -560,7 +582,24 @@ export default function HomePage() {
         }
 
         const prev = postScoresByIdRef.current;
-        if (prev[postId]?.second) continue;
+        const existingSecond = prev[postId]?.second;
+        if (existingSecond && Object.keys(existingSecond).length > 0) {
+          const busyKey = `p:${postId}`;
+          if (secondModerationBusyRef.current.has(busyKey)) continue;
+          secondModerationBusyRef.current.add(busyKey);
+          try {
+            const persistRes = await persistModerationDevScores({
+              postId,
+              patch: { second: existingSecond },
+            });
+            if (persistRes.ok) removePostNeedsSecondModeration(postId);
+          } catch (e) {
+            console.warn("persist second post:", e);
+          } finally {
+            secondModerationBusyRef.current.delete(busyKey);
+          }
+          continue;
+        }
 
         const busyKey = `p:${postId}`;
         if (secondModerationBusyRef.current.has(busyKey)) continue;
@@ -582,7 +621,11 @@ export default function HomePage() {
             const row = p[postId] ?? {};
             return { ...p, [postId]: { ...row, second: scores } };
           });
-          removePostNeedsSecondModeration(postId);
+          const persistRes = await persistModerationDevScores({
+            postId,
+            patch: { second: scores },
+          });
+          if (persistRes.ok) removePostNeedsSecondModeration(postId);
         } catch (e) {
           console.warn("second moderation row:", e);
         } finally {
@@ -605,8 +648,25 @@ export default function HomePage() {
           continue;
         }
 
-        const prev = replyScoresByIdRef.current;
-        if (prev[replyId]?.second) continue;
+        const rprev = replyScoresByIdRef.current;
+        const rExistingSecond = rprev[replyId]?.second;
+        if (rExistingSecond && Object.keys(rExistingSecond).length > 0) {
+          const busyKey = `r:${replyId}`;
+          if (secondModerationBusyRef.current.has(busyKey)) continue;
+          secondModerationBusyRef.current.add(busyKey);
+          try {
+            const persistRes = await persistModerationDevScores({
+              replyId,
+              patch: { second: rExistingSecond },
+            });
+            if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
+          } catch (e) {
+            console.warn("persist second reply:", e);
+          } finally {
+            secondModerationBusyRef.current.delete(busyKey);
+          }
+          continue;
+        }
 
         const busyKey = `r:${replyId}`;
         if (secondModerationBusyRef.current.has(busyKey)) continue;
@@ -628,7 +688,11 @@ export default function HomePage() {
             const row = p[replyId] ?? {};
             return { ...p, [replyId]: { ...row, second: scores } };
           });
-          removeReplyNeedsSecondModeration(replyId);
+          const persistRes = await persistModerationDevScores({
+            replyId,
+            patch: { second: scores },
+          });
+          if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
         } catch (e) {
           console.warn("second moderation row (reply):", e);
         } finally {
@@ -874,11 +938,14 @@ export default function HomePage() {
         content: string;
         parent_reply_id?: number;
         moderation_max_score: number;
+        moderation_dev_scores: { first: Record<string, number> } | null;
       } = {
         post_id: postId,
         user_id: userId,
         content,
         moderation_max_score: overallMax,
+        moderation_dev_scores:
+          Object.keys(scores).length > 0 ? { first: scores } : null,
       };
       if (parentReplyId != null) {
         insertRow.parent_reply_id = parentReplyId;
@@ -1057,6 +1124,10 @@ export default function HomePage() {
         content: textContent,
         user_id: userId,
         moderation_max_score: postOverallMax,
+        moderation_dev_scores:
+          Object.keys(postScores).length > 0
+            ? { first: postScores }
+            : null,
       })
       .select("id")
       .single();
