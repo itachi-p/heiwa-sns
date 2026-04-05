@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
+import { AutosizeTextarea } from "@/components/autosize-textarea";
+import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
@@ -851,7 +853,11 @@ export default function HomePage() {
   };
 
   const handleSavePostEdit = async (postId: number) => {
-    if (!userId) return;
+    if (postEditSaving) return;
+    if (!userId) {
+      setToast({ message: "ログインしてください。", tone: "error" });
+      return;
+    }
     const content = editDraft.trim();
     const existing = posts.find((p) => p.id === postId);
     const hasImage = Boolean(existing?.image_storage_path?.trim());
@@ -866,11 +872,22 @@ export default function HomePage() {
     }
     setPostEditSaving(true);
     setErrorMessage(null);
-    const { error } = await supabase
-      .from("posts")
-      .update({ pending_content: content })
-      .eq("id", postId)
-      .eq("user_id", userId);
+    let error: { message: string } | null = null;
+    try {
+      const res = await supabase
+        .from("posts")
+        .update({ pending_content: content })
+        .eq("id", postId)
+        .eq("user_id", userId);
+      error = res.error;
+    } catch {
+      setPostEditSaving(false);
+      setToast({
+        message: "通信エラーが発生しました。もう一度お試しください。",
+        tone: "error",
+      });
+      return;
+    }
     setPostEditSaving(false);
     if (error) {
       setToast({ message: error.message, tone: "error" });
@@ -1982,28 +1999,19 @@ export default function HomePage() {
                     </div>
                   </div>
                 </details>
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="いまどうしてる？"
-                  rows={3}
-                  className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                />
-                <div className="flex flex-col gap-2">
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
+                <div className="flex items-end gap-2">
+                  <AutosizeTextarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="いまどうしてる？"
+                    maxRows={12}
                     disabled={submitting}
-                    aria-label="画像を添付"
-                    className="max-w-full text-sm text-gray-800 file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-gray-500 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-800 hover:file:bg-gray-100"
-                    onChange={(e) => {
+                    className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
+                  />
+                  <ImageAttachIconButton
+                    disabled={submitting}
+                    onPick={(file) => {
                       void (async () => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
-                        if (!file) {
-                          setComposePostImage(null);
-                          return;
-                        }
                         const r = await preparePostImageForUpload(file);
                         if (!r.ok) {
                           setComposeFormError(r.message);
@@ -2018,6 +2026,8 @@ export default function HomePage() {
                       })();
                     }}
                   />
+                </div>
+                <div className="flex flex-col gap-2">
                   {composeImagePreviewUrl ? (
                     <div className="flex flex-wrap items-end gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2072,7 +2082,7 @@ export default function HomePage() {
                     key={post.id}
                     className="break-words rounded-lg border border-gray-200 bg-white p-4"
                   >
-                    <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="mb-1 flex min-w-0 items-start justify-between gap-2">
                       <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-gray-800">
                         <UserAvatar
                           name={post.users?.nickname ?? null}
@@ -2081,63 +2091,64 @@ export default function HomePage() {
                             post.users?.avatar_placeholder_hex ?? null
                           }
                         />
-                        <span>{post.users?.nickname ?? "（未設定）"}</span>
+                        <span className="line-clamp-2 min-w-0 flex-1 break-words">
+                          {post.users?.nickname ?? "（未設定）"}
+                        </span>
                       </div>
-                      <div className="flex shrink-0 flex-wrap items-center gap-1">
-                        {canInteract &&
-                        userId &&
-                        post.user_id &&
-                        canEditOwnPost(post.created_at, userId, post.user_id) ? (
-                          <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleDeletePost(
+                            post.id,
+                            post.image_storage_path
+                          )
+                        }
+                        className="shrink-0 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs text-red-700 hover:bg-red-100"
+                      >
+                        削除
+                      </button>
+                    </div>
+                    <div className="mb-1 flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 text-sm text-gray-500">
+                      <span className="min-w-0">
+                        {post.created_at
+                          ? new Date(post.created_at).toLocaleString()
+                          : ""}
+                      </span>
+                      {canInteract &&
+                      userId &&
+                      post.user_id &&
+                      canEditOwnPost(post.created_at, userId, post.user_id) ? (
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
                             編集残り{" "}
                             {formatRemainingLabel(
                               getEditRemainingMs(post.created_at, nowTick)
                             )}
                           </span>
-                        ) : null}
-                        {canInteract &&
-                        userId &&
-                        post.user_id &&
-                        canEditOwnPost(post.created_at, userId, post.user_id) ? (
-                          editingPostId === post.id ? (
+                          {editingPostId === post.id ? (
                             <button
                               type="button"
-                              onClick={() => setEditingPostId(null)}
-                              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 hover:bg-gray-50"
-                            >
-                              編集をやめる
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingPostId(post.id);
-                                setEditDraft(post.pending_content ?? post.content);
-                              }}
-                              className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-800 hover:bg-gray-50"
+                            onClick={() => setEditingPostId(null)}
+                            className="rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-800 hover:bg-gray-50"
+                          >
+                            編集取消
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingPostId(post.id);
+                                setEditDraft(
+                                  post.pending_content ?? post.content
+                                );
+                            }}
+                              className="rounded-full border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-800 hover:bg-gray-50"
                             >
                               編集
                             </button>
-                          )
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void handleDeletePost(
-                              post.id,
-                              post.image_storage_path
-                            )
-                          }
-                          className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-1 text-sm text-gray-500">
-                      {post.created_at
-                        ? new Date(post.created_at).toLocaleString()
-                        : ""}
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                     {(() => {
                       const postImg = getPostImagePublicUrl(
@@ -2158,12 +2169,12 @@ export default function HomePage() {
                     })()}
                     {editingPostId === post.id ? (
                       <div className="mt-1 space-y-2">
-                        <textarea
+                        <AutosizeTextarea
                           value={editDraft}
                           onChange={(e) => setEditDraft(e.target.value)}
-                          rows={5}
-                          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                          maxRows={14}
                           disabled={postEditSaving}
+                          className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
                         />
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -2277,7 +2288,7 @@ export default function HomePage() {
                             選択した返信への返信を入力しています。
                           </p>
                         ) : null}
-                        <textarea
+                        <AutosizeTextarea
                           value={replyDrafts[post.id] ?? ""}
                           onChange={(e) => {
                             const v = e.target.value;
@@ -2286,7 +2297,7 @@ export default function HomePage() {
                               [post.id]: v,
                             }));
                           }}
-                          rows={3}
+                          maxRows={10}
                           maxLength={2000}
                           placeholder={
                             replyParentReplyId != null
@@ -2294,7 +2305,7 @@ export default function HomePage() {
                               : "返信を入力…"
                           }
                           autoFocus
-                          className="mb-2 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                          className="mb-2 min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
                         />
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -2364,13 +2375,14 @@ export default function HomePage() {
       {toast?.message?.trim() ? (
         <div
           className={[
-            "pointer-events-none fixed bottom-24 left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg px-4 py-2.5 text-center text-sm shadow-lg",
+            "pointer-events-none fixed left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-center text-sm text-white shadow-lg",
+            "top-[calc(env(safe-area-inset-top,0px)+1.75rem)] lg:top-auto lg:bottom-24",
             toast.tone === "error"
-              ? "border border-red-400/80 bg-red-950 text-red-50"
-              : "border border-gray-200 bg-gray-900 text-white",
+              ? "border-red-400/80 bg-red-900"
+              : "border-gray-200 bg-gray-900",
           ].join(" ")}
-          role={toast.tone === "error" ? "alert" : "status"}
-          aria-live={toast.tone === "error" ? "assertive" : "polite"}
+          role="status"
+          aria-live="polite"
         >
           {toast.message}
         </div>

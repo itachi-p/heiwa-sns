@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useState } from "react";
+import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { UserAvatar } from "@/components/user-avatar";
 import {
@@ -188,13 +189,13 @@ function ReplyItem({
       </div>
       {editingReplyId === reply.id ? (
         <div className="mt-2 space-y-2">
-          <textarea
+          <AutosizeTextarea
             value={editReplyDraft}
             onChange={(e) => onEditDraftChange(e.target.value)}
-            rows={4}
+            maxRows={10}
             maxLength={2000}
             disabled={replyEditSaving}
-            className="w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+            className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
           />
           <div className="flex flex-wrap gap-2">
             <button
