@@ -41,37 +41,28 @@ const p2 = process.env.TEST_USER2_PASSWORD;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-/** users.toxicity_filter_level の値（TOXICITY_THRESHOLDS と対応） */
 type FilterLevel = "strict" | "soft" | "normal" | "off";
 
-/**
- * 閾値帯ごとに 1 件ずつ `moderation_max_score` を固定（API 採点は使わない）。
- * `TOXICITY_THRESHOLDS`: strict 0.3 / soft 0.5 / normal 0.7。ノイズフロア 0.2 以下は有効スコア 0。
- */
 const TIERS = [
   {
     key: "S015",
-    /** 0.2 以下 → 有効 0 → どの段階でも表示 */
     moderation_max_score: 0.15,
-    body: "穏やかな一日でした。",
+    body: "今日は読書をして穏やかに過ごしました。良い一日でした。",
   },
   {
     key: "S035",
-    /** 有効 0.35 → 厳しめ(0.3)のみ非表示 */
     moderation_max_score: 0.35,
-    body: "境界付近の表現（スコアは DB で固定）。",
+    body: "左派はみんな脳内お花畑",
   },
   {
     key: "S055",
-    /** 有効 0.55 → 厳しめ・やや厳しめで非表示、標準では表示 */
     moderation_max_score: 0.55,
-    body: "中程度の攻撃的表現（スコアは DB で固定）。",
+    body: "お前らの主張は支離滅裂で、聞いているこっちが馬鹿みたいだ。さっさと黙れ。",
   },
   {
     key: "S075",
-    /** 有効 0.75 → off 以外は非表示 */
     moderation_max_score: 0.75,
-    body: "強い攻撃的表現（スコアは DB で固定）。",
+    body: "お前は死ね、消えろ、最低のクズだ。二度と顔を見せるな。",
   },
 ] as const;
 
@@ -97,7 +88,6 @@ async function logout(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 15_000 });
 }
 
-/** プロフィール編集モーダル内の「表示フィルタ」用 select */
 function toxicityFilterSelect(page: Page) {
   return page
     .locator("form")
@@ -133,7 +123,6 @@ async function setToxicityFilter(page: Page, level: FilterLevel): Promise<void> 
   await saveProfileAndClose(page);
 }
 
-/** main 内にマーカー文字列を含む投稿カードがあるか */
 async function postWithMarkerVisible(page: Page, marker: string): Promise<boolean> {
   const main = page.locator("main");
   const hit = main.getByText(marker, { exact: false });
@@ -147,14 +136,12 @@ function createAdminClient(): SupabaseClient | null {
   });
 }
 
-/** 投稿本文の一意マーカーで `moderation_max_score` を上書き（E2E 用） */
 async function patchModerationScoresByMarkers(
   admin: SupabaseClient,
   runId: string,
   tiers: readonly { key: string; moderation_max_score: number }[]
 ): Promise<void> {
   for (const t of tiers) {
-    /** `[]` は PostgreSQL の ILIKE パターンと衝突するためマーカーに含めない */
     const marker = `E2E-FILTER-${runId}-${t.key}`;
     const { error } = await admin
       .from("posts")
@@ -164,7 +151,6 @@ async function patchModerationScoresByMarkers(
   }
 }
 
-/** effectiveScore > threshold なら非表示（`app/page.tsx` の閲覧ロジックと同じ変換） */
 function expectHiddenAtLevel(
   level: FilterLevel,
   moderationMax: number
