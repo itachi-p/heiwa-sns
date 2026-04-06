@@ -7,10 +7,11 @@ alwaysApply: true
 
 ## 触る前に読む（優先順）
 
-1. **`docs/README.md`** — どの文書が何の役割か（索引）。
-2. **`docs/dev/IMPLEMENTATION_REFERENCE.md`** — タイムライン・毒性・スキの**現行実装**の要約（数式・ファイルパス）。アルゴリズム変更時は **同じ変更で本ファイルを更新**する。
-3. **`docs/PRODUCT_PRINCIPLES.md`** と **`docs/DECISIONS.md`** — 採用済みの思想・決定。**これらと矛盾する挙動・「おまけ」機能を勝手に足さない**。
-4. **`docs/schema.md`** + **`.cursor/rules/database-and-migrations.mdc`** — DB・マイグレーションは **ユーザーが同一スレッドで明示依頼したときのみ**。
+1. **`docs/CONSTITUTION.md`** — **コード変更はユーザーが同一スレッドで明示したときのみ**（相談だけ・未確定案の実装禁止・依頼外ファイルを触らない）。経緯は日付ログに追記可。
+2. **`docs/README.md`** — どの文書が何の役割か（索引）。
+3. **`docs/dev/IMPLEMENTATION_REFERENCE.md`** — タイムライン・毒性・スキの**現行実装**の要約（数式・ファイルパス）。アルゴリズム変更時は **同じ変更で本ファイルを更新**する。
+4. **`docs/PRODUCT_PRINCIPLES.md`** と **`docs/DECISIONS.md`** — 採用済みの思想・決定。**これらと矛盾する挙動・「おまけ」機能を勝手に足さない**。
+5. **`docs/schema.md`** + **`.cursor/rules/database-and-migrations.mdc`** — DB・マイグレーションは **ユーザーが同一スレッドで明示依頼したときのみ**。
 
 ## 変更時の同期
 

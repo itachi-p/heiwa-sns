@@ -4,22 +4,26 @@
  * 調整するときはこのオブジェクトと {@link HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD} をまとめて見る。
  */
 export const TOXICITY_THRESHOLDS = {
+  /** 厳しめ（安心重視） */
   strict: 0.3,
+  /** やや厳しめ */
   soft: 0.5,
+  /** 標準（デフォルト） */
   normal: 0.7,
   off: 1.0,
 } as const;
 
 /**
- * この値以下のスコアは閲覧フィルタでは実質ノイズ扱い（しきい値との比較前に 0 に正規化）。
- * レベル閾値を 0.1 未満に下げるチューニングは、現状の想定では意味がほぼない。
+ * Perspective 等の `moderation_max_score` を閲覧比較に使う前のノイズ下限（DB の保存値は変えない）。
+ * **この値以下は `effectiveScoreForViewerToxicityFilter` が 0** — 閲覧フィルタの除外判定・
+ * （同じ有効スコアを参照する箇所の）表示順ペナルティの対象外。将来 0.1 に下げる等の調整はここだけ。
  */
-export const TOXICITY_SCORE_NOISE_FLOOR = 0.1;
+export const TOXICITY_SCORE_NOISE_FLOOR = 0.2;
 
 /**
  * 投稿直後・返信直後に投稿者へ「見えにくくなるかも」と出すライン。
  * 既定閲覧フィルタ「標準」と同じ値（{@link TOXICITY_THRESHOLDS.normal}）に揃える。
- * 閲覧者が「フィルタしない」(off) のときのみ、0.7 超の投稿もタイムライン・リプでそのまま見える。
+ * 閲覧者が「フィルタしない」(off) のときのみ、閾値超の投稿もタイムライン・リプでそのまま見える。
  */
 export const HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD = TOXICITY_THRESHOLDS.normal;
 
@@ -42,7 +46,12 @@ export function thresholdForLevel(level: ToxicityFilterLevel): number {
   return TOXICITY_THRESHOLDS[level];
 }
 
-/** タイムライン除外・リプ折りたたみ判定用（ノイズフロア適用後のスコア） */
+/**
+ * タイムライン除外・リプ折りたたみ判定用。
+ * 引数は DB に保存された `moderation_max_score`（投稿ごとに固定）。返す値だけが閲覧側比較用。
+ * フロア以下は比較上「閾値未満」とみなすため 0 を返す（保存値を書き換えるわけではない）。
+ * INSERT/UPDATE には使わない（スコアの永続化は投稿・確定フローで Perspective の値をそのまま書く）。
+ */
 export function effectiveScoreForViewerToxicityFilter(
   moderationMaxScore: number | null | undefined
 ): number {

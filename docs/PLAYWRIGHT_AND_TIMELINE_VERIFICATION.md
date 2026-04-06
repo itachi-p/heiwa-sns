@@ -63,7 +63,7 @@
    npm run test:e2e:headed
    ```
 
-**Supabase / ログインが必要なシナリオ**を E2E に書く場合は、`.env.local` の有無・テスト用アカウント・CI のシークレットなどを別途設計する（現状の `e2e/smoke.spec.ts` は未ログインのトップ表示のみ）。
+**Supabase / ログインが必要なシナリオ**を E2E に書く場合は、`.env.local` の有無・テスト用アカウント・CI のシークレットなどを別途設計する（現状の `e2e/smoke.spec.ts` は未ログインのトップ表示のみ）。**`e2e/filtering.spec.ts`** は閲覧フィルタの帯を確定させるため、テスト用投稿の `moderation_max_score` を **`SUPABASE_SERVICE_ROLE_KEY` で上書き**する（`NEXT_PUBLIC_SUPABASE_URL` も必要）。API の自動採点だけでは帯が揺れるため。
 
 ---
 
@@ -86,10 +86,10 @@
 
 ### 5.2 ソートキー（残った投稿の並び）
 
-**要点のみ**（定数・式・`reply_toxic_events` の扱いはすべて [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) §1）:
+**要点のみ**（定数・式はすべて [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) §1）:
 
-- **主軸は `created_at`（ミリ秒）**: 新しい投稿が常に上。スキ由来の二次スコアは **同一タイムスタンプのタイブレーク**にのみ効く。
-- 手動検証「数分以内の2投稿でスキが効く」は、**DB 上 `created_at` が同一 ms** のときに限り相対順が変わる可能性がある（通常は時刻差で決まる）。
+- **仮想時刻** `virtualSortMs`（`created_at` + スキ由来ブースト + 自分投稿ブースト − 投稿の攻撃性ペナルティ）を降順。ブースト／ペナルティは **数分相当の上限**。
+- 手動検証では **数分以内**に近い時刻で投稿した2件なら、スキや（閾値未満の）高めの攻撃性スコアで **相対順が変わりうる**。
 
 ---
 
@@ -116,8 +116,8 @@
 2. **A** でトップを開き、**スキ前**の並びをメモする（上から B と C のどちらが先か）。
 3. **A** だけが **B の投稿に「スキ」** を付ける（C には付けない）。
 4. トップを **再読み込み** し、並びが変わるか確認する。  
-   - 期待: **同一 5 分スロット内**では B の投稿が相対的に上に来やすくなる（二次スコアの差）。  
-   - **スロットをまたいだ古い投稿**は、スキだけでは新しいスロットより上に来ない。
+   - 期待: **近い時刻**の投稿同士では、スキで B 側が相対的に上に来やすくなる（上限付きブースト）。  
+   - **かなり古い投稿**は、スキだけでは最上部を無制限に独占しない。
 
 **攻撃性フィルタの確認（別観点）**
 
@@ -143,7 +143,7 @@
 |------|----------------|
 | 実装要約（数式・閾値の一覧） | `docs/dev/IMPLEMENTATION_REFERENCE.md` |
 | タイムライン取得・フィルタ・ソート | `app/page.tsx`（`fetchPosts`） |
-| タイムライン並び（スロット＋二次スコア） | `lib/timeline-sort.ts` |
+| タイムライン並び（仮想時刻＋スキ＋攻撃性ペナルティ） | `lib/timeline-sort.ts` |
 | 閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | スキ RPC | `supabase/migrations/` 内 `user_affinity` / `apply_user_affinity_on_like` |
 | 5指標の DB 保存・2行目・キャッシュ | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/second-moderation-timing.ts`, `lib/pending-second-moderation.ts` |

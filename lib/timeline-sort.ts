@@ -1,17 +1,32 @@
 /**
  * タイムライン並び（`app/page.tsx` のみ使用）。
- * **created_at（ミリ秒）を第一キー**とし、より新しい投稿が常に上。
- * 「スキ」等の二次スコアは **同一タイムスタンプのタイブレーク** にのみ効く（通常は同順位）。
+ *
+ * **仮想時刻** `virtualSortMs` を降順に並べる:
+ *   `created_at` + スキ由来ブースト + 自分投稿ブースト − 投稿の攻撃性スコア由来ペナルティ
+ *
+ * 新しさが主軸だが、**数分以内**の差であればスキで上がり・高毒性で下がりうる（無制限に古い投稿が
+ * 最上部を独占しないようブースト／ペナルティはミリ秒上限でキャップ）。
  */
 
-/** 互換・文書用。並びには使わない（旧 5 分スロット方式の名残） */
+import { effectiveScoreForViewerToxicityFilter } from "@/lib/toxicity-filter-level";
+
+/** スキ由来で `created_at` に足せる最大（ms）。`affinitySortContribution` の飽和をこの幅に線形対応 */
+export const TIMELINE_AFFINITY_MAX_BOOST_MS = 3 * 60 * 1000;
+
+/** 他人投稿の `effectiveScore`（0〜1）に応じて `created_at` から引く最大（ms） */
+export const TIMELINE_TOXICITY_MAX_PENALTY_MS = 5 * 60 * 1000;
+
+/** 閲覧者本人の投稿にだけ足す微ブースト（ms） */
+export const TIMELINE_OWN_POST_BOOST_MS = 60 * 1000;
+
+/** 互換・文書用。並びには直接使わない */
 export const TIMELINE_SORT_SLOT_MS = 5 * 60 * 1000;
 
 /** @deprecated 旧「同一作者連続緩和」用。現在の並びでは未使用。 */
 export const TIMELINE_MAX_CONSECUTIVE_SAME_AUTHOR = 2;
 
 /**
- * 「スキ」由来の加点（タイブレーク用のみ）。対数で飽和し無制限に上がらない。
+ * 「スキ」由来の加点（0〜0.08、対数飽和）。ブースト ms への換算の素に使う。
  */
 export function affinitySortContribution(likeScore: number): number {
   const s = Number.isFinite(likeScore) ? Math.max(0, likeScore) : 0;
@@ -19,7 +34,7 @@ export function affinitySortContribution(likeScore: number): number {
 }
 
 /**
- * reply_toxic_events 由来の乗数（従来 0.5〜0.8）を、並び用に弱い減衰 0.97〜1.0 に圧縮。
+ * reply_toxic_events 由来の乗数（0.5〜0.8 付近）を、スキ側ブーストに掛ける弱い減衰。
  */
 export function toxicitySortSoftFactor(relationMultiplier: number): number {
   const m = Number.isFinite(relationMultiplier) ? relationMultiplier : 1;
@@ -40,48 +55,58 @@ function sameUser(a: string | undefined, b: string | undefined): boolean {
   return String(a).toLowerCase() === String(b).toLowerCase();
 }
 
-function secondarySortScore(
-  post: { user_id?: string; created_at?: string | null },
-  viewerUserId: string | null,
-  affinityByAuthor: Map<string, number>,
-  toxByAuthor: Map<string, number>
-): number {
-  const like = post.user_id ? affinityByAuthor.get(post.user_id) ?? 0 : 0;
-  const tox = post.user_id ? toxByAuthor.get(post.user_id) ?? 1 : 1;
-  const aff = affinitySortContribution(like) * toxicitySortSoftFactor(tox);
-  const own =
-    viewerUserId && sameUser(post.user_id, viewerUserId) ? 0.1 : 0;
-  return aff + own;
-}
-
 /**
- * **第1キー**: `created_at` のエポック ms **降順**（新しいほど上。1ms でも差があればそれが優先）。
- * **第2キー**: 同一 ms のみ二次スコア（スキ・軽い毒性・自分投稿の微ブースト）。
- * **第3キー**: `id` 降順（安定化）。
+ * 閲覧者→作者のスキと関係ペナルティから、仮想時刻に足す ms（0〜TIMELINE_AFFINITY_MAX_BOOST_MS 付近）。
  */
-export function compareTimelinePosts(
-  a: { user_id?: string; created_at?: string | null; id?: number },
-  b: { user_id?: string; created_at?: string | null; id?: number },
-  viewerUserId: string | null,
-  affinityByAuthor: Map<string, number>,
-  toxByAuthor: Map<string, number>
+export function affinityTimeBoostMs(
+  likeScore: number,
+  relationMultiplier: number
 ): number {
-  const ta = createdMs(a);
-  const tb = createdMs(b);
-  if (tb !== ta) return tb > ta ? 1 : tb < ta ? -1 : 0;
-
-  const secB = secondarySortScore(b, viewerUserId, affinityByAuthor, toxByAuthor);
-  const secA = secondarySortScore(a, viewerUserId, affinityByAuthor, toxByAuthor);
-  const d = secB - secA;
-  if (Math.abs(d) > 1e-12) return d > 0 ? 1 : d < 0 ? -1 : 0;
-
-  const idB = b.id ?? 0;
-  const idA = a.id ?? 0;
-  return idB > idA ? 1 : idB < idA ? -1 : 0;
+  const dim =
+    affinitySortContribution(likeScore) * toxicitySortSoftFactor(relationMultiplier);
+  return (dim / 0.08) * TIMELINE_AFFINITY_MAX_BOOST_MS;
 }
 
 /**
- * @deprecated 旧 5 分スロット用。`created_at` 優先後は順序を崩すため `sortTimelinePosts` では呼ばない。
+ * 投稿のモデレーション攻撃性（閲覧比較用に変換した有効スコア）に応じて仮想時刻から引く ms。
+ * 自分の投稿にはペナルティを付けない（表示はフィルタ済みでも順位だけ沈めない）。
+ */
+export function moderationTimePenaltyMs(
+  moderationMaxScore: number | null | undefined,
+  isOwnPost: boolean
+): number {
+  if (isOwnPost) return 0;
+  const eff = effectiveScoreForViewerToxicityFilter(moderationMaxScore);
+  return eff * TIMELINE_TOXICITY_MAX_PENALTY_MS;
+}
+
+/**
+ * 並び替えキー（大きいほどタイムライン上で上）。同一値のときは `id` 降順で安定化。
+ */
+export function computeTimelineVirtualSortMs(
+  post: {
+    user_id?: string;
+    created_at?: string | null;
+    id?: number;
+    moderation_max_score?: number | null;
+  },
+  viewerUserId: string | null,
+  affinityByAuthor: Map<string, number>,
+  relationMultiplierByAuthor: Map<string, number>
+): number {
+  const cm = createdMs(post);
+  const uid = post.user_id;
+  const like = uid ? affinityByAuthor.get(uid) ?? 0 : 0;
+  const rel = uid ? relationMultiplierByAuthor.get(uid) ?? 1 : 1;
+  const boost = affinityTimeBoostMs(like, rel);
+  const isOwn = Boolean(viewerUserId && sameUser(uid, viewerUserId));
+  const own = isOwn ? TIMELINE_OWN_POST_BOOST_MS : 0;
+  const penalty = moderationTimePenaltyMs(post.moderation_max_score, isOwn);
+  return cm + boost + own - penalty;
+}
+
+/**
+ * @deprecated 旧 5 分スロット用。現在は `sortTimelinePosts` で呼ばない。
  */
 export function softenSameAuthorStreaks<
   T extends { user_id?: string; created_at?: string | null },
@@ -89,15 +114,60 @@ export function softenSameAuthorStreaks<
   return [...posts];
 }
 
+export function compareTimelinePosts<
+  T extends {
+    user_id?: string;
+    created_at?: string | null;
+    id?: number;
+    moderation_max_score?: number | null;
+  },
+>(
+  a: T,
+  b: T,
+  viewerUserId: string | null,
+  affinityByAuthor: Map<string, number>,
+  relationMultiplierByAuthor: Map<string, number>
+): number {
+  const va = computeTimelineVirtualSortMs(
+    a,
+    viewerUserId,
+    affinityByAuthor,
+    relationMultiplierByAuthor
+  );
+  const vb = computeTimelineVirtualSortMs(
+    b,
+    viewerUserId,
+    affinityByAuthor,
+    relationMultiplierByAuthor
+  );
+  const d = vb - va;
+  if (Math.abs(d) > 1e-6) return d > 0 ? 1 : d < 0 ? -1 : 0;
+
+  const idB = b.id ?? 0;
+  const idA = a.id ?? 0;
+  return idB > idA ? 1 : idB < idA ? -1 : 0;
+}
+
 export function sortTimelinePosts<
-  T extends { user_id?: string; created_at?: string | null; id?: number },
+  T extends {
+    user_id?: string;
+    created_at?: string | null;
+    id?: number;
+    moderation_max_score?: number | null;
+  },
 >(
   posts: T[],
   viewerUserId: string | null,
   affinityByAuthor: Map<string, number>,
-  toxByAuthor: Map<string, number>
+  relationMultiplierByAuthor: Map<string, number>
 ): T[] {
   return [...posts].sort((a, b) =>
-    compareTimelinePosts(a, b, viewerUserId, affinityByAuthor, toxByAuthor)
+    compareTimelinePosts(
+      a,
+      b,
+      viewerUserId,
+      affinityByAuthor,
+      relationMultiplierByAuthor
+    )
   );
 }

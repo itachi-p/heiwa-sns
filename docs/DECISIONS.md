@@ -14,6 +14,13 @@ Use newest-first entries.
 
 ## 2026-04-02
 
+### タイムライン並びを仮想時刻モデルに変更（スキ＋投稿の攻撃性）
+
+- **Status:** accepted
+- **Context:** 旧実装は `created_at` を第一キーとし、スキは **同一 ms のタイブレークのみ**で実質ほぼ効かない。一方、`reply_toxic_events` 由来の弱い係数だけが二次に乗り、**投稿の `moderation_max_score` は並びに使われず**、設計上の「攻撃性による順位の減衰」と齟齬があった。
+- **Decision:** `lib/timeline-sort.ts` で **仮想時刻**（`created_at` + 上限付きスキブースト + 本人微ブースト − 上限付き攻撃性ペナルティ）を降順に並べる。ペナルティは **`effectiveScoreForViewerToxicityFilter(moderation_max_score)`**（他人投稿のみ）。関係ペナルティは従来どおりスキ側ブーストに乗算。定数は `TIMELINE_*_MS` で調整可能。
+- **Consequences:** 数分以内の近接投稿ではスキ・毒性・関係が組み合わさって順序が変わりうる。十分に時間が離れた投稿は新しさが優先しやすい。`docs/dev/IMPLEMENTATION_REFERENCE.md`・`PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`・`INVITE_DEEP_DIVE.md` を更新。
+
 ### 投稿者向け毒性注意の閾値を閲覧「標準」（0.7）に統一
 
 - **Status:** accepted

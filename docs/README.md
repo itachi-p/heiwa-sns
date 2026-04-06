@@ -21,6 +21,7 @@
 
 | 優先度 | 内容 | ファイル |
 |--------|------|-----------|
+| **最優先** | **明示依頼がない限りコードを変えない**・未確定案を実装に落とさない境界 | [`CONSTITUTION.md`](CONSTITUTION.md) |
 | **高** | プロダクト不変条件・判断基準 | [`PRODUCT_PRINCIPLES.md`](PRODUCT_PRINCIPLES.md)、[`DECISIONS.md`](DECISIONS.md) |
 | **高** | タイムライン・毒性フィルタ・スキの**実装に即した**要約 | [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) |
 | **高** | DB・マイグレーション禁止の境界 | リポジトリ `.cursor/rules/database-and-migrations.mdc` |
@@ -33,6 +34,6 @@
 
 ## Cursor ルールとの対応
 
-- **ドキュメント階層・不変条件の遵守**: `.cursor/rules/documentation-and-principles.mdc`（`alwaysApply`）
+- **憲法・ドキュメント階層**: [`CONSTITUTION.md`](CONSTITUTION.md)、`.cursor/rules/documentation-and-principles.mdc`（`alwaysApply`）
 - **DB 変更の禁止境界**: `.cursor/rules/database-and-migrations.mdc`
 - **再発時の運用**: `.cursor/rules/agent-workflow.mdc`
