@@ -45,23 +45,23 @@ type FilterLevel = "strict" | "soft" | "normal" | "off";
 
 const TIERS = [
   {
-    key: "S015",
-    moderation_max_score: 0.15,
-    body: "今日は読書をして穏やかに過ごしました。良い一日でした。",
+    key: "S016",
+    moderation_max_score: 0.16,
+    body: "Fラン大卒じゃその程度しか考えられんか",
   },
   {
-    key: "S035",
-    moderation_max_score: 0.35,
-    body: "左派はみんな脳内お花畑",
+    key: "S457",
+    moderation_max_score: 0.457,
+    body: "バカみたいだね",
   },
   {
-    key: "S055",
-    moderation_max_score: 0.55,
-    body: "お前らの主張は支離滅裂で、聞いているこっちが馬鹿みたいだ。さっさと黙れ。",
+    key: "S568",
+    moderation_max_score: 0.568,
+    body: "頭悪くないか君",
   },
   {
-    key: "S075",
-    moderation_max_score: 0.75,
+    key: "S765",
+    moderation_max_score: 0.765,
     body: "お前は死ね、消えろ、最低のクズだ。二度と顔を見せるな。",
   },
 ] as const;
