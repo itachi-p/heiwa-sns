@@ -30,8 +30,6 @@
 | avatar_placeholder_hex | text | |
 | bio | text | |
 | interests | text | レガシー用途の可能性あり（趣味は別テーブルも参照） |
-| timeline_toxicity_threshold | real | レガシー（旧UI）。閲覧フィルタは `toxicity_filter_level` を優先 |
-| reply_toxicity_threshold | real | レガシー（旧UI） |
 | toxicity_filter_level | text | `strict` / `soft` / `normal` / `off`。閾値はアプリ定数で解釈 |
 | interest_custom_creations_count | int 等 | マイグレーション参照 |
 
@@ -84,7 +82,7 @@
 
 ### `public.user_affinity`
 
-「スキ」で更新する **ユーザー間** の累積スコア（投稿ごとの人気指標は持たない）。
+「スキ」で更新する **ユーザー間** の累積重み（タイムライン順の補助。投稿ごとの人気指標は持たない）。製品説明では「親密度」という語は使わない（人を数字で評価しない方針）。Supabase のテーブルコメントも同趣旨。
 
 | 列 | 型 | 備考 |
 |----|-----|------|
@@ -102,3 +100,4 @@
 | 2026-04-05 | `user_affinity`・スキ由来タイムライン優先度。 |
 | 2026-04-10 | `posts.image_storage_path`・バケット `post-images`。 |
 | 2026-04-11 | `posts` / `post_replies` に `moderation_dev_scores`（jsonb）。 |
+| 2026-04-12 | `users` から `timeline_toxicity_threshold` / `reply_toxicity_threshold` を削除（閲覧は `toxicity_filter_level` のみ）。`user_affinity` に中立なテーブルコメント。 |
