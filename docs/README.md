@@ -1,6 +1,6 @@
 # ドキュメント索引（Nagi SNS）
 
-**しばしば書き換えない前提**の設計・仕様メモを、読者と粒度で分けています。  
+**しばしば書き換えない前提**の設計・仕様メモを、読者と粒度で分けています。
 **実装の真実は常にコード**（と `supabase/migrations/`）。文章は追従が遅れることがあるため、差分が出たら **コード側を正**として本ディレクトリを更新してください。
 
 ---
@@ -24,6 +24,7 @@
 | **最優先** | **明示依頼がない限りコードを変えない**・未確定案を実装に落とさない境界 | [`CONSTITUTION.md`](CONSTITUTION.md) |
 | **高** | プロダクト不変条件・判断基準 | [`PRODUCT_PRINCIPLES.md`](PRODUCT_PRINCIPLES.md)、[`DECISIONS.md`](DECISIONS.md) |
 | **高** | タイムライン・毒性フィルタ・スキの**実装に即した**要約 | [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) |
+| **中** | **実装予定・消化済み・備忘**（アルゴリズム定義は書かない） | [`dev/IMPLEMENTATION_BACKLOG.md`](dev/IMPLEMENTATION_BACKLOG.md) |
 | **高** | DB・マイグレーション禁止の境界 | リポジトリ `.cursor/rules/database-and-migrations.mdc` |
 | **中** | E2E（Playwright）と手動検証 | [`PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`](PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md) |
 | **中** | スキーマ意図（真実は migrations） | [`schema.md`](schema.md) |

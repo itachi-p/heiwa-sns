@@ -18,6 +18,7 @@ alwaysApply: true
 - タイムライン順・毒性閾値・スキの効き方を変えたら: **`docs/dev/IMPLEMENTATION_REFERENCE.md`** を必ず更新。手動検証手順に影響があれば **`docs/PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`** も更新。
 - マイグレーションを追加したら: **`docs/schema.md`** を同じコミットで更新（`database-and-migrations.mdc` のルールどおり）。
 - 重要な方針転換は: **`docs/DECISIONS.md`** に短く追記（ユーザー承認後）。
+- **予定・完了の進捗メモ**は: **`docs/dev/IMPLEMENTATION_BACKLOG.md`** を着手・完了のタイミングで更新（アルゴリズム定義は `IMPLEMENTATION_REFERENCE.md`）。
 
 ## 招待・外向け文章
 
