@@ -100,6 +100,7 @@ export function SiteHeader({
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteToken, setInviteToken] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [loginModalBanner, setLoginModalBanner] = useState<{
@@ -144,32 +145,55 @@ export function SiteHeader({
       });
       return;
     }
+    if (authMode === "signup" && !inviteToken.trim()) {
+      setLoginModalBanner({
+        variant: "error",
+        text: "招待コードを入力してください。",
+      });
+      return;
+    }
 
     setAuthSubmitting(true);
     try {
       if (authMode === "signup") {
-        const { error } = await withTimeout(
-          supabase.auth.signUp({
-            email: normalizedEmail,
-            password,
+        const signupRes = await withTimeout(
+          fetch("/api/invite-signup", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              password,
+              inviteToken: inviteToken.trim(),
+            }),
           }),
           AUTH_TIMEOUT_MS,
           "認証リクエストがタイムアウトしました。時間をおいて再試行してください。"
         );
-        if (error) {
+        const signupJson = (await signupRes.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        if (!signupRes.ok) {
+          setLoginModalBanner({
+            variant: "error",
+            text: signupJson?.error?.trim() || "新規登録に失敗しました。",
+          });
+          return;
+        }
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+        if (signInError) {
           setLoginModalBanner({
             variant: "error",
             text: formatAuthError(
-              error,
-              "新規登録に失敗しました。時間をおいて再試行してください。"
+              signInError,
+              "登録は完了しましたが、ログインに失敗しました。"
             ),
           });
           return;
         }
-        setLoginModalBanner({
-          variant: "info",
-          text: "確認メールを送信しました。メールを確認してください。",
-        });
+        setInviteToken("");
         return;
       }
 
@@ -377,6 +401,20 @@ export function SiteHeader({
                 placeholder="パスワード"
                 className="rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
               />
+              {authMode === "signup" ? (
+                <div className="space-y-1">
+                  <input
+                    type="text"
+                    value={inviteToken}
+                    onChange={(e) => setInviteToken(e.target.value)}
+                    placeholder="招待コード"
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
+                  <p className="text-xs text-gray-500">
+                    先行体験ユーザー向けのコードが必要です。
+                  </p>
+                </div>
+              ) : null}
               <button
                 type="submit"
                 disabled={authSubmitting}
