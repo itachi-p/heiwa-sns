@@ -31,6 +31,7 @@
 | bio | text | |
 | interests | text | レガシー用途の可能性あり（趣味は別テーブルも参照） |
 | toxicity_filter_level | text | `strict` / `soft` / `normal` / `off`。閾値はアプリ定数で解釈 |
+| toxicity_over_threshold_behavior | text | `hide` / `fold`。閾値超コンテンツを非表示にするか折りたたむか |
 | interest_custom_creations_count | int 等 | マイグレーション参照 |
 
 ### `public.posts`
@@ -101,3 +102,4 @@
 | 2026-04-10 | `posts.image_storage_path`・バケット `post-images`。 |
 | 2026-04-11 | `posts` / `post_replies` に `moderation_dev_scores`（jsonb）。 |
 | 2026-04-12 | `users` から `timeline_toxicity_threshold` / `reply_toxicity_threshold` を削除（閲覧は `toxicity_filter_level` のみ）。`user_affinity` に中立なテーブルコメント。 |
+| 2026-04-13 | `users.toxicity_over_threshold_behavior` を追加（`hide`/`fold`）。 |

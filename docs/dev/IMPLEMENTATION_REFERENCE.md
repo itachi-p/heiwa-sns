@@ -8,13 +8,20 @@
 
 ## 1. タイムライン表示順（トップ `app/page.tsx`）
 
-処理順: **毒性フィルタで除外** → **並び替え**（`lib/timeline-sort.ts` の `sortTimelinePosts`）。
+処理順: **ページング取得**（20件ずつ）→ **毒性フィルタ/折りたたみ** → **並び替え**（`lib/timeline-sort.ts` の `sortTimelinePosts`）。
 
-### 1.1 毒性による除外（他人投稿のみ）
+### 1.1 毒性による除外・折りたたみ（他人投稿のみ）
 
 - 閲覧者の `toxicity_filter_level` → 閾値は `lib/toxicity-filter-level.ts` の `TOXICITY_THRESHOLDS`（`strict` 0.3 / `soft` 0.5 / `normal` 0.7 / `off` 1.0）。
 - 比較対象は `moderation_max_score`（DB・投稿ごとに固定）を **`effectiveScoreForViewerToxicityFilter` で閲覧用に変換した値**（ノイズフロア `TOXICITY_SCORE_NOISE_FLOOR`、既定 0.2）。保存値そのものは変えない。
-- **`effectiveScore > thresholdForLevel(level)`** ならタイムラインから除外。**自分の投稿は常に残す**。
+- 閲覧者の `toxicity_over_threshold_behavior` が `hide` のとき、**`effectiveScore > thresholdForLevel(level)`** ならタイムラインから除外（自分投稿は常に残す）。
+- `fold` のときはタイムラインから除外せず、投稿・返信ともに「表示制限」カードで折りたたみ表示（展開で本文を表示）。
+
+### 1.3 ページング（トップ）
+
+- `app/page.tsx` は `TIMELINE_PAGE_SIZE`（既定 20）で `posts` を `range()` 取得。
+- 初回ロード後は「さらに読み込む」で追加ページを取得し、既存配列に id 重複なく結合。
+- 初回取得中は「まだ投稿がありません」ではなく読み込み文言を表示（空表示ちらつき軽減）。
 
 ### 1.2 並び（仮想時刻: 新しさ + スキ − 投稿の攻撃性）
 
@@ -40,7 +47,7 @@ virtualSortMs = created_ms
 ## 2. 毒性・UI メッセージ（投稿者向け注意など）
 
 - 投稿・返信直後の投稿者向け注意: `overallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD`。値は **`TOXICITY_THRESHOLDS.normal`（標準・0.7）と同一**（`lib/toxicity-filter-level.ts`）。文言・表示形式は `lib/visibility-notice.ts` および `app/page.tsx` / `app/home/page.tsx` の既存定数のまま。
-- 閲覧側: `off`（1.0）以外では `effectiveScore > thresholdForLevel(level)` で他人投稿をタイムラインから除外。**リプ折りたたみ**（`components/reply-thread.tsx`）は **現状も同じ** `thresholdForLevel` を渡している（タイムラインと閾値は同一。リプのみ別しきい値にする案は [DECISIONS.md](../DECISIONS.md) で保留）。
+- 閲覧側: 閾値は `thresholdForLevel(level)` を共通利用。`toxicity_over_threshold_behavior` が `hide` なら閾値超を非表示、`fold` なら折りたたみ（投稿・返信とも同一方針）。
 - **`off` のときのみ**閾値超もタイムライン・リプでそのまま見える。
 - 返信折りたたみ等の UI 文言・条件は `app/page.tsx` / `app/home/page.tsx` を参照（変更時は本書に一行追記可）。
 
@@ -65,6 +72,7 @@ virtualSortMs = created_ms
 
 | 領域 | 主なファイル |
 |------|----------------|
+| ログイン UI（Google ＋ メール／パスワード） | `components/site-header.tsx` |
 | タイムライン取得・フィルタ・呼び出し | `app/page.tsx`（`fetchPosts`） |
 | 並び純関数 | `lib/timeline-sort.ts` |
 | 毒性閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
@@ -72,3 +80,4 @@ virtualSortMs = created_ms
 | 5 指標（DB + キャッシュ） | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/persist-moderation-dev-scores-client.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/pending-second-moderation.ts`, `lib/second-moderation-timing.ts` |
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |
+| アクティビティ | `app/home/activity/page.tsx` |

@@ -1,8 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
+  DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
+  parseToxicityOverThresholdBehavior,
   parseToxicityFilterLevel,
   thresholdForLevel,
+  type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
 
@@ -28,4 +31,24 @@ export async function fetchToxicityFilterLevel(
   const raw = (data as { toxicity_filter_level?: string | null } | null)
     ?.toxicity_filter_level;
   return parseToxicityFilterLevel(raw);
+}
+
+/**
+ * 閾値超コンテンツの扱い（未マイグレーション時は hide）
+ */
+export async function fetchToxicityOverThresholdBehavior(
+  client: SupabaseClient,
+  userId: string
+): Promise<ToxicityOverThresholdBehavior> {
+  const { data, error } = await client
+    .from("users")
+    .select("toxicity_over_threshold_behavior")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) return DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR;
+  const raw = (data as {
+    toxicity_over_threshold_behavior?: string | null;
+  } | null)?.toxicity_over_threshold_behavior;
+  return parseToxicityOverThresholdBehavior(raw);
 }

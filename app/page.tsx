@@ -22,6 +22,7 @@ import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
 import {
   ANON_TOXICITY_VIEW_THRESHOLD,
+  fetchToxicityOverThresholdBehavior,
   fetchToxicityFilterLevel,
 } from "@/lib/timeline-threshold";
 import {
@@ -30,9 +31,12 @@ import {
 } from "@/lib/visibility-notice";
 import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
+  DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   effectiveScoreForViewerToxicityFilter,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS,
   thresholdForLevel,
+  type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
@@ -102,6 +106,7 @@ type Post = {
 
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 const RELATION_PENALTY_WINDOW_DAYS = 14;
+const TIMELINE_PAGE_SIZE = 20;
 
 type PostReply = {
   id: number;
@@ -155,6 +160,13 @@ export default function Home() {
   /** users.toxicity_filter_level（タイムライン・リプの閾値は TOXICITY_THRESHOLDS で導出） */
   const [toxicityFilterLevel, setToxicityFilterLevel] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
+  const [toxicityOverThresholdBehavior, setToxicityOverThresholdBehavior] =
+    useState<ToxicityOverThresholdBehavior>(
+      DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
+    );
+  const [expandedFoldedPosts, setExpandedFoldedPosts] = useState<Set<number>>(
+    () => new Set()
+  );
   /** 5指標テスト表示（画面用のみ・localStorage。初期化で読み込まないと空 {} が先に保存され消える） */
   const [postScoresById, setPostScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
@@ -167,6 +179,10 @@ export default function Home() {
     useState(false);
   const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineLoadingMore, setTimelineLoadingMore] = useState(false);
+  const [timelineHasMore, setTimelineHasMore] = useState(true);
+  const [timelineOffset, setTimelineOffset] = useState(0);
   const [input, setInput] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   /** 数秒で消える通知（編集保存・注意など） */
@@ -304,6 +320,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    setExpandedFoldedPosts(new Set());
+  }, [toxicityOverThresholdBehavior, toxicityFilterLevel, userId]);
+
+  useEffect(() => {
     if (editingPostId != null) {
       const post = posts.find((p) => p.id === editingPostId);
       if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
@@ -343,7 +363,17 @@ export default function Home() {
     }
   }
 
-  const fetchPosts = async () => {
+  const fetchPosts = async (opts?: { append?: boolean }) => {
+    const append = opts?.append === true;
+    if (append) {
+      if (timelineLoading || timelineLoadingMore || !timelineHasMore) return;
+      setTimelineLoadingMore(true);
+    } else {
+      setTimelineLoading(true);
+      setTimelineHasMore(true);
+      setTimelineOffset(0);
+    }
+    try {
     if (userId) {
       try {
         await fetch("/api/finalize-my-pending", {
@@ -354,9 +384,12 @@ export default function Home() {
         /* 確定 API が失敗しても一覧取得は続行 */
       }
     }
+    const start = append ? timelineOffset : 0;
+    const end = start + TIMELINE_PAGE_SIZE - 1;
     const { data: rows, error } = await supabase
       .from("posts")
       .select("*")
+      .range(start, end)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -364,7 +397,15 @@ export default function Home() {
       return;
     }
 
-    const list = (rows ?? []) as Post[];
+    const pageRows = (rows ?? []) as Post[];
+    setTimelineHasMore(pageRows.length === TIMELINE_PAGE_SIZE);
+    setTimelineOffset(start + pageRows.length);
+    const list = append
+      ? ([
+          ...posts,
+          ...pageRows.filter((r) => !posts.some((p) => p.id === r.id)),
+        ] as Post[])
+      : pageRows;
     const authorIds = [
       ...new Set(
         list
@@ -460,14 +501,19 @@ export default function Home() {
       ? thresholdForLevel(toxicityFilterLevel)
       : ANON_TOXICITY_VIEW_THRESHOLD;
 
+    const visibleForTimeline =
+      toxicityOverThresholdBehavior === "hide"
+        ? merged.filter((p) => {
+            const score = effectiveScoreForViewerToxicityFilter(
+              p.moderation_max_score
+            );
+            if (userId && p.user_id === userId) return true;
+            return score <= viewThreshold;
+          })
+        : merged;
+
     const timelinePosts = sortTimelinePosts(
-      merged.filter((p) => {
-        const score = effectiveScoreForViewerToxicityFilter(
-          p.moderation_max_score
-        );
-        if (userId && p.user_id === userId) return true;
-        return score <= viewThreshold;
-      }),
+      visibleForTimeline,
       userId,
       affinityLikeScoreByAuthor,
       relationMultiplierByAuthor
@@ -561,6 +607,10 @@ export default function Home() {
     }
 
     setErrorMessage(null);
+    } finally {
+      setTimelineLoading(false);
+      setTimelineLoadingMore(false);
+    }
   };
 
   const fetchPostsRef = useRef(fetchPosts);
@@ -851,8 +901,9 @@ export default function Home() {
         (data as { avatar_placeholder_hex?: string | null } | null)
           ?.avatar_placeholder_hex ?? null
       );
-      setToxicityFilterLevel(
-        await fetchToxicityFilterLevel(supabase, userId)
+      setToxicityFilterLevel(await fetchToxicityFilterLevel(supabase, userId));
+      setToxicityOverThresholdBehavior(
+        await fetchToxicityOverThresholdBehavior(supabase, userId)
       );
       setProfileReady(true);
     })();
@@ -905,6 +956,7 @@ export default function Home() {
     setProfilePlaceholderHex(null);
     setProfileReady(false);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
+    setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
     setNicknameDraft("");
     void fetchPosts();
   };
@@ -1640,11 +1692,14 @@ export default function Home() {
             ) : null}
 
             <section>
-              {posts.length === 0 ? (
+              {timelineLoading ? (
+                <p className="text-sm text-gray-500">投稿を読み込み中…</p>
+              ) : posts.length === 0 ? (
                 <p className="text-sm text-gray-500">
                   まだ投稿がありません。
                 </p>
               ) : (
+                <>
                 <ul className="space-y-3">
                   {posts.map((post) => (
                 <li
@@ -1762,7 +1817,45 @@ export default function Home() {
                       </div>
                     ) : null;
                   })()}
-                  {editingPostId === post.id ? (
+                  {(() => {
+                    const postScore = effectiveScoreForViewerToxicityFilter(
+                      post.moderation_max_score
+                    );
+                    const postThreshold = userId
+                      ? thresholdForLevel(toxicityFilterLevel)
+                      : ANON_TOXICITY_VIEW_THRESHOLD;
+                    const isOwnPost = Boolean(userId && post.user_id === userId);
+                    const shouldFoldPost =
+                      toxicityOverThresholdBehavior === "fold" &&
+                      !isOwnPost &&
+                      postScore > postThreshold &&
+                      !expandedFoldedPosts.has(post.id);
+                    if (shouldFoldPost) {
+                      return (
+                        <div className="mt-2 space-y-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm text-amber-950">
+                          <p className="text-gray-700">
+                            この投稿は表示が制限されています
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedFoldedPosts((prev) => {
+                                const next = new Set(prev);
+                                next.add(post.id);
+                                return next;
+                              })
+                            }
+                            className="text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
+                          >
+                            タップして表示
+                          </button>
+                          <p className="text-xs text-gray-500">
+                            {TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS.fold}
+                          </p>
+                        </div>
+                      );
+                    }
+                    return editingPostId === post.id ? (
                     <div className="mt-1 space-y-2">
                       <AutosizeTextarea
                         value={editDraft}
@@ -1782,7 +1875,7 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
-                  ) : (
+                    ) : (
                     <div className="mt-1 whitespace-pre-wrap break-words">
                       {renderTextWithLinks(
                         resolvePendingVisibleContent(
@@ -1793,7 +1886,8 @@ export default function Home() {
                         )
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                   {postScoresById[post.id]?.first ||
                   postScoresById[post.id]?.second ? (
                     <div className="mt-1 space-y-1 rounded border border-gray-100 bg-gray-50/80 px-2 py-1">
@@ -1895,6 +1989,7 @@ export default function Home() {
                                 ? thresholdForLevel(toxicityFilterLevel)
                                 : ANON_TOXICITY_VIEW_THRESHOLD
                             }
+                            overThresholdBehavior={toxicityOverThresholdBehavior}
                             replyScoresById={replyScoresById}
                             onEditDraftChange={setEditReplyDraft}
                             onStartEdit={(r) => {
@@ -1967,6 +2062,19 @@ export default function Home() {
                 </li>
                   ))}
                 </ul>
+                {timelineHasMore ? (
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => void fetchPosts({ append: true })}
+                      disabled={timelineLoadingMore}
+                      className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      {timelineLoadingMore ? "読み込み中…" : "さらに読み込む"}
+                    </button>
+                  </div>
+                ) : null}
+                </>
               )}
             </section>
             {!needsNickname ? (

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
@@ -10,17 +11,24 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
-import { fetchToxicityFilterLevel } from "@/lib/timeline-threshold";
+import {
+  fetchToxicityFilterLevel,
+  fetchToxicityOverThresholdBehavior,
+} from "@/lib/timeline-threshold";
 import {
   POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
   REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
 } from "@/lib/visibility-notice";
 import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
+  DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS,
+  TOXICITY_OVER_THRESHOLD_BEHAVIORS,
   thresholdForLevel,
   TOXICITY_FILTER_LEVEL_LABELS,
   TOXICITY_FILTER_SELECT_ORDER,
+  type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
@@ -81,6 +89,17 @@ import {
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
 const RELATION_PENALTY_MIN_SCORE = 0.2;
+
+function isMissingOverThresholdBehaviorColumnError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const rec = error as { code?: string; message?: string; details?: string };
+  const joined = `${rec.message ?? ""} ${rec.details ?? ""}`.toLowerCase();
+  return (
+    joined.includes("toxicity_over_threshold_behavior") ||
+    rec.code === "42703" ||
+    rec.code === "PGRST204"
+  );
+}
 
 type Post = {
   id: number;
@@ -150,6 +169,16 @@ export default function HomePage() {
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
   const [toxicityFilterDraft, setToxicityFilterDraft] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
+  const [toxicityOverThresholdBehavior, setToxicityOverThresholdBehavior] =
+    useState<ToxicityOverThresholdBehavior>(
+      DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
+    );
+  const [
+    toxicityOverThresholdBehaviorDraft,
+    setToxicityOverThresholdBehaviorDraft,
+  ] = useState<ToxicityOverThresholdBehavior>(
+    DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
+  );
   const [postScoresById, setPostScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
   );
@@ -362,7 +391,10 @@ export default function HomePage() {
       profile = fallback.data as ProfileRow | null;
     }
 
-    const filterLevel = await fetchToxicityFilterLevel(supabase, uid);
+    const [filterLevel, overBehavior] = await Promise.all([
+      fetchToxicityFilterLevel(supabase, uid),
+      fetchToxicityOverThresholdBehavior(supabase, uid),
+    ]);
 
     // プリセットだけでなく、誰かが登録した is_preset=false も共有マスタなので検索対象に含める
     const catalogRes = await supabase
@@ -507,11 +539,13 @@ export default function HomePage() {
     setProfilePlaceholderHex(placeholderHex);
     setProfileBio(bio);
     setToxicityFilterLevel(filterLevel);
+    setToxicityOverThresholdBehavior(overBehavior);
     setPresetRows((catalogData ?? []) as InterestPick[]);
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
       setInterestDraft(picks);
       setToxicityFilterDraft(filterLevel);
+      setToxicityOverThresholdBehaviorDraft(overBehavior);
     }
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
@@ -784,6 +818,10 @@ export default function HomePage() {
       setEditingReplyId(null);
       setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
       setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
+      setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
+      setToxicityOverThresholdBehaviorDraft(
+        DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
+      );
       return;
     }
 
@@ -825,6 +863,10 @@ export default function HomePage() {
     setEditingReplyId(null);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
     setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
+    setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
+    setToxicityOverThresholdBehaviorDraft(
+      DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
+    );
   };
 
   const handleDeletePost = async (
@@ -1333,6 +1375,7 @@ export default function HomePage() {
       bio: bioDraft.trim(),
       interest_custom_creations_count: customCreationsUsed,
       toxicity_filter_level: toxicityFilterDraft,
+      toxicity_over_threshold_behavior: toxicityOverThresholdBehaviorDraft,
     };
     const patch = !profilePlaceholderHex
       ? { ...baseUpdate, avatar_placeholder_hex: hex }
@@ -1341,16 +1384,22 @@ export default function HomePage() {
     let appliedHex: string | null = !profilePlaceholderHex ? hex : null;
     let { error } = await supabase.from("users").update(patch).eq("id", userId);
 
-    if (
-      error &&
-      isMissingAvatarPlaceholderHexError(error) &&
-      appliedHex != null
-    ) {
+    if (error && isMissingAvatarPlaceholderHexError(error) && appliedHex != null) {
       appliedHex = null;
-      ({ error } = await supabase
-        .from("users")
-        .update(baseUpdate)
-        .eq("id", userId));
+      ({ error } = await supabase.from("users").update(baseUpdate).eq("id", userId));
+    }
+    if (error && isMissingOverThresholdBehaviorColumnError(error)) {
+      const legacyBase = {
+        nickname: result.value,
+        bio: bioDraft.trim(),
+        interest_custom_creations_count: customCreationsUsed,
+        toxicity_filter_level: toxicityFilterDraft,
+      };
+      const legacyPatch =
+        appliedHex != null
+          ? { ...legacyBase, avatar_placeholder_hex: appliedHex }
+          : legacyBase;
+      ({ error } = await supabase.from("users").update(legacyPatch).eq("id", userId));
     }
 
     if (error) {
@@ -1368,6 +1417,7 @@ export default function HomePage() {
     setProfileNickname(result.value);
     setProfileBio(bioDraft.trim());
     setToxicityFilterLevel(toxicityFilterDraft);
+    setToxicityOverThresholdBehavior(toxicityOverThresholdBehaviorDraft);
     if (appliedHex) {
       setProfilePlaceholderHex(appliedHex);
     }
@@ -1432,6 +1482,7 @@ export default function HomePage() {
         setInterestSearchQuery("");
         setInterestConfirm(null);
         setToxicityFilterDraft(toxicityFilterLevel);
+        setToxicityOverThresholdBehaviorDraft(toxicityOverThresholdBehavior);
       }
       return !prev;
     });
@@ -1792,6 +1843,26 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
+                    閾値超コンテンツの表示方法
+                  </label>
+                  <select
+                    value={toxicityOverThresholdBehaviorDraft}
+                    onChange={(e) =>
+                      setToxicityOverThresholdBehaviorDraft(
+                        e.target.value as ToxicityOverThresholdBehavior
+                      )
+                    }
+                    className="w-full max-w-md rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  >
+                    {TOXICITY_OVER_THRESHOLD_BEHAVIORS.map((v) => (
+                      <option key={v} value={v}>
+                        {TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS[v]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600">
                     趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
                   </label>
                   <p className="text-xs text-gray-500">
@@ -1883,6 +1954,9 @@ export default function HomePage() {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
                       setToxicityFilterDraft(toxicityFilterLevel);
+                      setToxicityOverThresholdBehaviorDraft(
+                        toxicityOverThresholdBehavior
+                      );
                       setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
@@ -1921,6 +1995,17 @@ export default function HomePage() {
 
         {userId && profileReady && !needsNickname ? (
           <section>
+            <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
+              <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
+                投稿
+              </span>
+              <Link
+                href="/home/activity"
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
+              >
+                アクティビティ
+              </Link>
+            </nav>
             <h2 className="mb-3 text-sm font-semibold text-gray-700">
               あなたの投稿（新しい順）
             </h2>
@@ -2261,6 +2346,7 @@ export default function HomePage() {
                                   ? thresholdForLevel(toxicityFilterLevel)
                                   : thresholdForLevel(DEFAULT_TOXICITY_FILTER_LEVEL)
                               }
+                              overThresholdBehavior={toxicityOverThresholdBehavior}
                               replyScoresById={replyScoresById}
                               onEditDraftChange={setEditReplyDraft}
                               onStartEdit={(r) => {

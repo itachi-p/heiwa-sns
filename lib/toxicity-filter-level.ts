@@ -31,6 +31,16 @@ export type ToxicityFilterLevel = keyof typeof TOXICITY_THRESHOLDS;
 
 export const DEFAULT_TOXICITY_FILTER_LEVEL: ToxicityFilterLevel = "normal";
 
+/** 閾値超コンテンツの扱い（表示しない / 折りたたんで見せる） */
+export const TOXICITY_OVER_THRESHOLD_BEHAVIORS = ["hide", "fold"] as const;
+export type ToxicityOverThresholdBehavior =
+  (typeof TOXICITY_OVER_THRESHOLD_BEHAVIORS)[number];
+export const DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR: ToxicityOverThresholdBehavior =
+  "hide";
+const OVER_THRESHOLD_BEHAVIOR_SET = new Set<string>(
+  TOXICITY_OVER_THRESHOLD_BEHAVIORS
+);
+
 const LEVEL_SET = new Set<string>(Object.keys(TOXICITY_THRESHOLDS));
 
 export function parseToxicityFilterLevel(
@@ -45,6 +55,23 @@ export function parseToxicityFilterLevel(
 export function thresholdForLevel(level: ToxicityFilterLevel): number {
   return TOXICITY_THRESHOLDS[level];
 }
+
+export function parseToxicityOverThresholdBehavior(
+  raw: string | null | undefined
+): ToxicityOverThresholdBehavior {
+  if (raw && OVER_THRESHOLD_BEHAVIOR_SET.has(raw)) {
+    return raw as ToxicityOverThresholdBehavior;
+  }
+  return DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR;
+}
+
+export const TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS: Record<
+  ToxicityOverThresholdBehavior,
+  string
+> = {
+  hide: "非表示（存在を出さない）",
+  fold: "折りたたみ（展開で見る）",
+};
 
 /**
  * タイムライン除外・リプ折りたたみ判定用。

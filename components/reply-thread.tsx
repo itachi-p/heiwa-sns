@@ -11,7 +11,10 @@ import {
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
-import { effectiveScoreForViewerToxicityFilter } from "@/lib/toxicity-filter-level";
+import {
+  effectiveScoreForViewerToxicityFilter,
+  type ToxicityOverThresholdBehavior,
+} from "@/lib/toxicity-filter-level";
 
 export type PostReplyRow = {
   id: number;
@@ -63,6 +66,7 @@ type ItemProps = {
   replyEditSaving: boolean;
   /** 閲覧者の攻撃性フィルタ閾値（この値を超える他人の返信は折りたたみ） */
   replyVisibilityThreshold: number;
+  overThresholdBehavior: ToxicityOverThresholdBehavior;
   replyScoresById: Record<
     number,
     { first?: Record<string, number>; second?: Record<string, number> }
@@ -86,6 +90,7 @@ function ReplyItem({
   editReplyDraft,
   replyEditSaving,
   replyVisibilityThreshold,
+  overThresholdBehavior,
   replyScoresById,
   onEditDraftChange,
   onStartEdit,
@@ -105,6 +110,9 @@ function ReplyItem({
   );
   const replyFolded =
     !isAuthor && maxScore > replyVisibilityThreshold;
+  if (replyFolded && overThresholdBehavior === "hide") {
+    return null;
+  }
 
   const replyScores = replyScoresById[reply.id];
   const hasDevScores =
@@ -260,6 +268,7 @@ function ReplyItem({
               editReplyDraft={editReplyDraft}
               replyEditSaving={replyEditSaving}
               replyVisibilityThreshold={replyVisibilityThreshold}
+              overThresholdBehavior={overThresholdBehavior}
               replyScoresById={replyScoresById}
               onEditDraftChange={onEditDraftChange}
               onStartEdit={onStartEdit}
@@ -285,6 +294,7 @@ type ThreadProps = {
   editReplyDraft: string;
   replyEditSaving: boolean;
   replyVisibilityThreshold: number;
+  overThresholdBehavior: ToxicityOverThresholdBehavior;
   replyScoresById: Record<
     number,
     { first?: Record<string, number>; second?: Record<string, number> }
@@ -313,6 +323,7 @@ export function ReplyThread(props: ThreadProps) {
           editReplyDraft={props.editReplyDraft}
           replyEditSaving={props.replyEditSaving}
           replyVisibilityThreshold={props.replyVisibilityThreshold}
+          overThresholdBehavior={props.overThresholdBehavior}
           replyScoresById={props.replyScoresById}
           onEditDraftChange={props.onEditDraftChange}
           onStartEdit={props.onStartEdit}
