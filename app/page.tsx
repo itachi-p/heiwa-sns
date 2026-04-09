@@ -615,6 +615,7 @@ export default function Home() {
 
   const fetchPostsRef = useRef(fetchPosts);
   fetchPostsRef.current = fetchPosts;
+  const timelineLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   const hasPendingContent = useMemo(
     () =>
@@ -650,6 +651,25 @@ export default function Home() {
     }, 30000);
     return () => window.clearInterval(id);
   }, [authReady, shouldPollTimeline]);
+
+  useEffect(() => {
+    const node = timelineLoadMoreSentinelRef.current;
+    if (!node) return;
+    if (timelineLoading || timelineLoadingMore || !timelineHasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (!first?.isIntersecting) return;
+        if (timelineLoading || timelineLoadingMore || !timelineHasMore) return;
+        void fetchPostsRef.current({ append: true });
+      },
+      { root: null, rootMargin: "240px 0px", threshold: 0.01 }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [timelineLoading, timelineLoadingMore, timelineHasMore, posts.length]);
 
   /** pending が消えた直後（cron 確定直後）に即再取得し、2行目取得 effect が確定本文を見られるようにする */
   const hadPendingContentRef = useRef(false);
@@ -2062,17 +2082,11 @@ export default function Home() {
                 </li>
                   ))}
                 </ul>
-                {timelineHasMore ? (
-                  <div className="mt-4 flex justify-center">
-                    <button
-                      type="button"
-                      onClick={() => void fetchPosts({ append: true })}
-                      disabled={timelineLoadingMore}
-                      className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                    >
-                      {timelineLoadingMore ? "読み込み中…" : "さらに読み込む"}
-                    </button>
-                  </div>
+                <div ref={timelineLoadMoreSentinelRef} className="h-1 w-full" />
+                {timelineLoadingMore ? (
+                  <p className="mt-4 text-center text-sm text-gray-500">
+                    読み込み中…
+                  </p>
                 ) : null}
                 </>
               )}
