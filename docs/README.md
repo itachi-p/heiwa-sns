@@ -12,6 +12,7 @@
 | **即読・コア**（先行招待向け） | [`INVITE_AT_A_GLANCE.md`](INVITE_AT_A_GLANCE.md) | 数分で「何をしないSNSか」が掴める |
 | **概要・やや詳しい** | [`INVITE_OVERVIEW.md`](INVITE_OVERVIEW.md) | 思想・向き/不向き・技術スタンスの中くらいの分量 |
 | **網羅・透明性** | [`INVITE_DEEP_DIVE.md`](INVITE_DEEP_DIVE.md) | 意思決定ログ・前提/見送り・実装参照・検証手順への導線 |
+| **メディア貼り付け用（文案・推敲履歴）** | [`invite-media/THREADS_PHASE1_EARLY_TESTERS.md`](invite-media/THREADS_PHASE1_EARLY_TESTERS.md) | Threads 等への投稿文・改訂ログ（500 文字前提） |
 
 英語の短い原則だけ欲しい場合は [`PRODUCT_PRINCIPLES.md`](PRODUCT_PRINCIPLES.md)（変更時は和文側との整合を確認）。
 
