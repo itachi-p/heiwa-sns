@@ -81,6 +81,21 @@
 
 返信に紐づく toxicity イベント（表示優先度の材料）。`max_score` の範囲はマイグレーションで更新済みの可能性あり。
 
+### `public.invite_tokens`
+
+先行テストの招待コード管理。`token` が未使用 (`is_used=false`) の場合のみ登録に利用する。
+
+| 列 | 型 | 備考 |
+|----|-----|------|
+| id | bigint PK | identity |
+| token | text | 一意な招待トークン |
+| is_used | boolean | 1回使用後 true |
+| used_at | timestamptz | 使用時刻 |
+| used_by_user_id | uuid | 使用した `auth.users.id` |
+| used_by_email | text | 使用メール |
+| note | text | 配布メモ（任意） |
+| created_at | timestamptz | 作成時刻 |
+
 ### `public.user_affinity`
 
 「スキ」で更新する **ユーザー間** の累積重み（タイムライン順の補助。投稿ごとの人気指標は持たない）。製品説明では「親密度」という語は使わない（人を数字で評価しない方針）。Supabase のテーブルコメントも同趣旨。
@@ -103,3 +118,4 @@
 | 2026-04-11 | `posts` / `post_replies` に `moderation_dev_scores`（jsonb）。 |
 | 2026-04-12 | `users` から `timeline_toxicity_threshold` / `reply_toxicity_threshold` を削除（閲覧は `toxicity_filter_level` のみ）。`user_affinity` に中立なテーブルコメント。 |
 | 2026-04-13 | `users.toxicity_over_threshold_behavior` を追加（`hide`/`fold`）。 |
+| 2026-04-13 | `invite_tokens` を追加（招待トークンの1回利用管理）。 |
