@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
+import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
@@ -164,6 +165,8 @@ export default function HomePage() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState<string | null>(null);
   const [profileBio, setProfileBio] = useState("");
   const [toxicityFilterLevel, setToxicityFilterLevel] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
@@ -256,8 +259,13 @@ export default function HomePage() {
   replyScoresByIdRef.current = replyScoresById;
 
   const userId = user?.id ?? null;
+  const needsPasswordChange =
+    Boolean(userId) && profileReady && mustChangePassword;
   const needsNickname =
-    Boolean(userId) && profileReady && profileNickname === null;
+    Boolean(userId) &&
+    profileReady &&
+    !needsPasswordChange &&
+    profileNickname === null;
 
   useEffect(() => {
     if (!needsNickname) setNicknameModalError(null);
@@ -364,7 +372,7 @@ export default function HomePage() {
     const profileRes = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count"
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -375,13 +383,17 @@ export default function HomePage() {
       avatar_placeholder_hex?: string | null;
       bio: string | null;
       interest_custom_creations_count?: number | null;
+      must_change_password?: boolean | null;
+      invite_label?: string | null;
     };
 
     let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
     if (profileRes.error) {
       const fallback = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex, bio")
+        .select(
+          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label"
+        )
         .eq("id", uid)
         .maybeSingle();
       if (fallback.error) {
@@ -534,6 +546,10 @@ export default function HomePage() {
     }
 
     setPosts(merged);
+    setMustChangePassword(Boolean(profile?.must_change_password));
+    setInviteLabel(
+      typeof profile?.invite_label === "string" ? profile.invite_label : null
+    );
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
     setProfilePlaceholderHex(placeholderHex);
@@ -808,6 +824,8 @@ export default function HomePage() {
     if (!userId || !user) {
       setProfileReady(false);
       setProfileNickname(null);
+      setMustChangePassword(false);
+      setInviteLabel(null);
       setProfilePlaceholderHex(null);
       setPosts([]);
       setRepliesByPost({});
@@ -844,6 +862,8 @@ export default function HomePage() {
     setProfileNickname(null);
     setProfileAvatarUrl(null);
     setProfilePlaceholderHex(null);
+    setMustChangePassword(false);
+    setInviteLabel(null);
     setProfileBio("");
     setPresetRows([]);
     setInterestPicksServer([]);
@@ -946,7 +966,7 @@ export default function HomePage() {
 
   const handleReplySubmit = async (postId: number) => {
     if (!userId) return;
-    if (needsNickname) return;
+    if (needsNickname || needsPasswordChange) return;
     const content = (replyDrafts[postId] ?? "").trim();
     if (!content) return;
     if (replySubmittingPostId != null) return;
@@ -1134,10 +1154,13 @@ export default function HomePage() {
   };
 
   const canInteract =
-    Boolean(userId) && profileReady && !needsNickname;
+    Boolean(userId) &&
+    profileReady &&
+    !needsNickname &&
+    !needsPasswordChange;
 
   const tryInteraction = (): boolean => {
-    if (needsNickname) return false;
+    if (needsNickname || needsPasswordChange) return false;
     if (!userId) {
       setErrorMessage("ログインしてください。");
       return false;
@@ -1152,6 +1175,7 @@ export default function HomePage() {
   const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) return;
+    if (needsNickname || needsPasswordChange) return;
     const textContent = draft.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
@@ -1700,7 +1724,7 @@ export default function HomePage() {
       />
 
       <div className="mx-auto max-w-xl p-4 sm:p-6">
-        {userId && profileReady && !needsNickname ? (
+        {userId && profileReady && !needsPasswordChange && !needsNickname ? (
           <section className="mb-4 text-sm text-gray-700">
             <div className="flex min-w-0 items-start gap-3">
               <UserAvatar
@@ -1993,7 +2017,7 @@ export default function HomePage() {
           <p className="text-gray-600">ホームを読み込み中…</p>
         ) : null}
 
-        {userId && profileReady && !needsNickname ? (
+        {userId && profileReady && !needsPasswordChange && !needsNickname ? (
           <section>
             <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
               <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
@@ -2446,6 +2470,15 @@ export default function HomePage() {
           </section>
         ) : null}
       </div>
+
+      <MustChangePasswordModal
+        open={Boolean(userId && profileReady && needsPasswordChange)}
+        userId={userId}
+        inviteLabel={inviteLabel}
+        onCompleted={() => {
+          setMustChangePassword(false);
+        }}
+      />
 
       <NicknameRequiredModal
         open={Boolean(userId && profileReady && needsNickname)}

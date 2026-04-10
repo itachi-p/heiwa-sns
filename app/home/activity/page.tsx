@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { startTransition, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
@@ -56,8 +57,12 @@ export default function HomeActivityPage() {
   );
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [loading, setLoading] = useState(true);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState<string | null>(null);
 
   const userId = user?.id ?? null;
+  const needsPasswordChange =
+    Boolean(userId) && profileReady && mustChangePassword;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -76,7 +81,9 @@ export default function HomeActivityPage() {
     setLoading(true);
     const { data: me, error: meErr } = await supabase
       .from("users")
-      .select("nickname, avatar_url, avatar_placeholder_hex")
+      .select(
+        "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label"
+      )
       .eq("id", uid)
       .maybeSingle();
     if (meErr) {
@@ -89,6 +96,14 @@ export default function HomeActivityPage() {
     setProfilePlaceholderHex(
       (me as { avatar_placeholder_hex?: string | null } | null)
         ?.avatar_placeholder_hex ?? null
+    );
+    const meRow = me as {
+      must_change_password?: boolean | null;
+      invite_label?: string | null;
+    } | null;
+    setMustChangePassword(Boolean(meRow?.must_change_password));
+    setInviteLabel(
+      typeof meRow?.invite_label === "string" ? meRow.invite_label : null
     );
 
     const [level, behavior] = await Promise.all([
@@ -162,6 +177,10 @@ export default function HomeActivityPage() {
   useEffect(() => {
     let cancelled = false;
     if (!userId) {
+      startTransition(() => {
+        setMustChangePassword(false);
+        setInviteLabel(null);
+      });
       return;
     }
     void (async () => {
@@ -183,6 +202,8 @@ export default function HomeActivityPage() {
       return;
     }
     setActivities([]);
+    setMustChangePassword(false);
+    setInviteLabel(null);
     setProfileReady(false);
   };
 
@@ -215,7 +236,7 @@ export default function HomeActivityPage() {
             {errorMessage}
           </div>
         ) : null}
-        {userId && profileReady ? (
+        {userId && profileReady && !needsPasswordChange ? (
           <section>
             <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
               <Link
@@ -291,6 +312,15 @@ export default function HomeActivityPage() {
           </section>
         ) : null}
       </div>
+
+      <MustChangePasswordModal
+        open={Boolean(userId && profileReady && needsPasswordChange)}
+        userId={userId}
+        inviteLabel={inviteLabel}
+        onCompleted={() => {
+          setMustChangePassword(false);
+        }}
+      />
     </main>
   );
 }

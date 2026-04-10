@@ -69,7 +69,17 @@ virtualSortMs = created_ms
 
 ---
 
-## 5. 関連ソース一覧（変更時チェック）
+## 5. 招待・初回パスワード変更（`users.must_change_password`）
+
+- **DB**: `users.is_invite_user` / `users.must_change_password` / `users.invite_label`（`docs/schema.md`・マイグレーション参照）。既存行はデフォルトでゲートに掛からない。
+- **招待メール新規登録**（`/api/invite-signup`）: トークン消費後に `is_invite_user=true`・`must_change_password=false`・`invite_label` を付与（`lib/invite-label.ts` の採番。一意衝突時は再試行）。
+- **貸与アカウント**: 運用で `must_change_password=true`（および必要なら `invite_label`）を付与。初回ログイン後は **`MustChangePasswordModal`**（`components/must-change-password-modal.tsx`）でパスワード変更を必須にし、成功後に `must_change_password=false` を自分の行へ `update`（`supabase.auth.updateUser` と続けて実行）。
+- **強度**: `lib/invite-password.ts`（8 文字以上・英字＋数字）。
+- **表示**: トップ `app/page.tsx`・マイホーム `app/home/page.tsx`・`app/home/activity/page.tsx`・自分の `app/home/[userId]/page.tsx` で `must_change_password===true` の間はニックネーム設定より先に当該モーダルを出し、操作は `canInteract` 相当でブロック（または閲覧を抑止）。
+
+---
+
+## 6. 関連ソース一覧（変更時チェック）
 
 | 領域 | 主なファイル |
 |------|----------------|
@@ -82,3 +92,5 @@ virtualSortMs = created_ms
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |
 | アクティビティ | `app/home/activity/page.tsx` |
+| 招待サインアップ API | `app/api/invite-signup/route.ts` |
+| 初回パスワード変更 UI | `components/must-change-password-modal.tsx`, `lib/invite-password.ts`, `lib/invite-label.ts` |

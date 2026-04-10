@@ -12,6 +12,7 @@ import Link from "next/link";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
+import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
@@ -34,7 +35,6 @@ import {
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   effectiveScoreForViewerToxicityFilter,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
-  TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS,
   thresholdForLevel,
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
@@ -157,6 +157,8 @@ export default function Home() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState<string | null>(null);
   /** users.toxicity_filter_level（タイムライン・リプの閾値は TOXICITY_THRESHOLDS で導出） */
   const [toxicityFilterLevel, setToxicityFilterLevel] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
@@ -243,8 +245,13 @@ export default function Home() {
   replyScoresByIdRef.current = replyScoresById;
   const userId = user?.id ?? null;
 
+  const needsPasswordChange =
+    Boolean(userId) && profileReady && mustChangePassword;
   const needsNickname =
-    Boolean(userId) && profileReady && profileNickname === null;
+    Boolean(userId) &&
+    profileReady &&
+    !needsPasswordChange &&
+    profileNickname === null;
 
   useEffect(() => {
     if (!needsNickname) setNicknameModalError(null);
@@ -891,6 +898,8 @@ export default function Home() {
       startTransition(() => {
         setProfileReady(false);
         setProfileNickname(null);
+        setMustChangePassword(false);
+        setInviteLabel(null);
         setNicknameDraft("");
       });
       return;
@@ -904,7 +913,9 @@ export default function Home() {
       await ensurePublicUserRow(user);
       const { data, error } = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex")
+        .select(
+          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label"
+        )
         .eq("id", userId)
         .maybeSingle();
 
@@ -915,6 +926,10 @@ export default function Home() {
       }
 
       const nick = data?.nickname ?? null;
+      setMustChangePassword(Boolean(data?.must_change_password));
+      setInviteLabel(
+        typeof data?.invite_label === "string" ? data.invite_label : null
+      );
       setProfileNickname(nick);
       setProfileAvatarUrl(data?.avatar_url ?? null);
       setProfilePlaceholderHex(
@@ -947,7 +962,7 @@ export default function Home() {
   }, [authReady, userId, profileReady, toxicityFilterLevel]);
 
   useEffect(() => {
-    if (!userId || !profileReady || needsNickname) {
+    if (!userId || !profileReady || needsNickname || needsPasswordChange) {
       if (!userId) {
         startTransition(() => setLikedPostIds(new Set()));
       }
@@ -961,7 +976,7 @@ export default function Home() {
         console.error("likes fetch error:", err);
       }
     })();
-  }, [userId, profileReady, needsNickname]);
+  }, [userId, profileReady, needsNickname, needsPasswordChange]);
 
   const signOut = async () => {
     setErrorMessage(null);
@@ -974,6 +989,8 @@ export default function Home() {
     setProfileNickname(null);
     setProfileAvatarUrl(null);
     setProfilePlaceholderHex(null);
+    setMustChangePassword(false);
+    setInviteLabel(null);
     setProfileReady(false);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
     setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
@@ -1033,7 +1050,7 @@ export default function Home() {
       setErrorMessage("ログインしてください。");
       return;
     }
-    if (needsNickname) return;
+    if (needsNickname || needsPasswordChange) return;
     const content = (replyDrafts[postId] ?? "").trim();
     if (!content) return;
     if (replySubmittingPostId != null) return;
@@ -1298,7 +1315,7 @@ export default function Home() {
       setComposeFormError("ログインしてください。");
       return;
     }
-    if (needsNickname) return;
+    if (needsNickname || needsPasswordChange) return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
@@ -1502,7 +1519,10 @@ export default function Home() {
   };
 
   const canInteract =
-    Boolean(userId) && profileReady && !needsNickname;
+    Boolean(userId) &&
+    profileReady &&
+    !needsNickname &&
+    !needsPasswordChange;
 
   /** スキ・返信・投稿など。ブロック時はモーダル用メッセージを返す */
   const interactionBlockedMessage = (): string | null => {
@@ -1519,7 +1539,7 @@ export default function Home() {
   };
 
   const tryInteraction = (): boolean => {
-    if (needsNickname) return false;
+    if (needsNickname || needsPasswordChange) return false;
     const msg = interactionBlockedMessage();
     if (msg) {
       setAuthGateModal({ open: true, message: msg });
@@ -1852,10 +1872,7 @@ export default function Home() {
                       !expandedFoldedPosts.has(post.id);
                     if (shouldFoldPost) {
                       return (
-                        <div className="mt-2 space-y-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm text-amber-950">
-                          <p className="text-gray-700">
-                            この投稿は表示が制限されています
-                          </p>
+                        <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm text-amber-950">
                           <button
                             type="button"
                             onClick={() =>
@@ -1867,11 +1884,8 @@ export default function Home() {
                             }
                             className="text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
                           >
-                            タップして表示
+                            表示制限中（タップで展開）
                           </button>
-                          <p className="text-xs text-gray-500">
-                            {TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS.fold}
-                          </p>
                         </div>
                       );
                     }
@@ -2091,7 +2105,7 @@ export default function Home() {
                 </>
               )}
             </section>
-            {!needsNickname ? (
+            {canInteract ? (
               <button
                 type="button"
                 onClick={() => {
@@ -2135,6 +2149,15 @@ export default function Home() {
           </p>
         </div>
       ) : null}
+
+      <MustChangePasswordModal
+        open={Boolean(userId && profileReady && needsPasswordChange)}
+        userId={userId}
+        inviteLabel={inviteLabel}
+        onCompleted={() => {
+          setMustChangePassword(false);
+        }}
+      />
 
       <NicknameRequiredModal
         open={Boolean(userId && profileReady && needsNickname)}

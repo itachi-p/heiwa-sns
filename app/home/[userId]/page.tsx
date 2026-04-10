@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import type { InterestPick } from "@/lib/interests";
@@ -68,6 +69,8 @@ export default function UserHomePage() {
   const [bio, setBio] = useState("");
   const [interestPicks, setInterestPicks] = useState<InterestPick[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState<string | null>(null);
 
   const sessionId = sessionUser?.id ?? null;
   const isOwn = Boolean(sessionId && targetId === sessionId);
@@ -99,7 +102,9 @@ export default function UserHomePage() {
 
       const { data: profile, error: profileErr } = await supabase
         .from("users")
-        .select("nickname, avatar_url, avatar_placeholder_hex, bio")
+        .select(
+          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label"
+        )
         .eq("id", targetId)
         .maybeSingle();
 
@@ -151,6 +156,21 @@ export default function UserHomePage() {
         return;
       }
 
+      const ownProfile = sessionUser?.id === targetId;
+      const pRow = profile as {
+        must_change_password?: boolean | null;
+        invite_label?: string | null;
+      };
+      if (ownProfile) {
+        setMustChangePassword(Boolean(pRow.must_change_password));
+        setInviteLabel(
+          typeof pRow.invite_label === "string" ? pRow.invite_label : null
+        );
+      } else {
+        setMustChangePassword(false);
+        setInviteLabel(null);
+      }
+
       const nick = profile.nickname ?? null;
       const av = profile.avatar_url ?? null;
       const ph =
@@ -178,6 +198,9 @@ export default function UserHomePage() {
       cancelled = true;
     };
   }, [authReady, sessionUser, targetId, idInvalid]);
+
+  const needsPasswordChange =
+    Boolean(sessionId && targetId === sessionId && mustChangePassword);
 
   return (
     <main className="min-h-screen bg-sky-50 text-gray-900">
@@ -211,6 +234,10 @@ export default function UserHomePage() {
           <p className="text-sm text-gray-600">ユーザーが見つかりません。</p>
         ) : loading ? (
           <p className="text-gray-600">読み込み中…</p>
+        ) : needsPasswordChange ? (
+          <p className="text-sm text-gray-600">
+            パスワードを変更するまでこの画面は利用できません。
+          </p>
         ) : (
           <>
             {errorMessage ? (
@@ -292,6 +319,17 @@ export default function UserHomePage() {
           </>
         )}
       </div>
+
+      <MustChangePasswordModal
+        open={Boolean(
+          sessionUser && targetId === sessionUser.id && needsPasswordChange
+        )}
+        userId={sessionUser?.id ?? null}
+        inviteLabel={inviteLabel}
+        onCompleted={() => {
+          setMustChangePassword(false);
+        }}
+      />
     </main>
   );
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { generateInviteLabel } from "@/lib/invite-label";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type Body = {
@@ -81,5 +82,39 @@ export async function POST(req: Request) {
     return badRequest("招待コードが無効です。");
   }
 
-  return NextResponse.json({ ok: true });
+  const uid = created.user.id;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const inviteLabel = generateInviteLabel();
+    const { error: profileErr } = await admin
+      .from("users")
+      .update({
+        is_invite_user: true,
+        must_change_password: false,
+        invite_label: inviteLabel,
+      })
+      .eq("id", uid);
+    if (!profileErr) {
+      return NextResponse.json({ ok: true });
+    }
+    const code = (profileErr as { code?: string }).code;
+    const msg = (profileErr.message ?? "").toLowerCase();
+    if (code === "23505" || msg.includes("duplicate") || msg.includes("unique")) {
+      continue;
+    }
+    await admin.auth.admin.deleteUser(uid).catch(() => {
+      /* best effort */
+    });
+    return NextResponse.json(
+      { error: profileErr.message ?? "プロフィールの更新に失敗しました。" },
+      { status: 500 }
+    );
+  }
+
+  await admin.auth.admin.deleteUser(uid).catch(() => {
+    /* best effort */
+  });
+  return NextResponse.json(
+    { error: "招待ラベルの採番に失敗しました。もう一度お試しください。" },
+    { status: 500 }
+  );
 }
