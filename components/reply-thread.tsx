@@ -218,15 +218,12 @@ function ReplyItem({
         </div>
       ) : replyFolded && !foldExpanded ? (
         <div className="mt-1 space-y-2 rounded-md border border-amber-100 bg-amber-50/60 px-2 py-2 text-sm text-amber-950">
-          <p className="text-gray-700">
-            この返信は表示が制限されています
-          </p>
           <button
             type="button"
             onClick={() => setFoldExpanded(true)}
             className="text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
           >
-            タップして表示
+            表示制限中（タップで展開）
           </button>
         </div>
       ) : (

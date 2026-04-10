@@ -13,6 +13,7 @@
 ### 1.1 毒性による除外・折りたたみ（他人投稿のみ）
 
 - 閲覧者の `toxicity_filter_level` → 閾値は `lib/toxicity-filter-level.ts` の `TOXICITY_THRESHOLDS`（`strict` 0.3 / `soft` 0.5 / `normal` 0.7 / `off` 1.0）。
+- 未ログイン閲覧は `ANON_TOXICITY_VIEW_THRESHOLD`（`soft`=0.5）かつ `hide` 固定で扱う。
 - 比較対象は `moderation_max_score`（DB・投稿ごとに固定）を **`effectiveScoreForViewerToxicityFilter` で閲覧用に変換した値**（ノイズフロア `TOXICITY_SCORE_NOISE_FLOOR`、既定 0.2）。保存値そのものは変えない。
 - 閲覧者の `toxicity_over_threshold_behavior` が `hide` のとき、**`effectiveScore > thresholdForLevel(level)`** ならタイムラインから除外（自分投稿は常に残す）。
 - `fold` のときはタイムラインから除外せず、投稿・返信ともに「表示制限」カードで折りたたみ表示（展開で本文を表示）。

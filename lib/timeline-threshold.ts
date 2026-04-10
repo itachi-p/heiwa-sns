@@ -9,10 +9,8 @@ import {
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
 
-/** 未ログイン時は「標準」レベルの閾値をタイムライン・リプの両方に使う */
-export const ANON_TOXICITY_VIEW_THRESHOLD = thresholdForLevel(
-  DEFAULT_TOXICITY_FILTER_LEVEL
-);
+/** 未ログイン時は「やや厳しめ（soft）」を固定で使う */
+export const ANON_TOXICITY_VIEW_THRESHOLD = thresholdForLevel("soft");
 
 /**
  * toxicity_filter_level（未マイグレーション時は 'normal'）
