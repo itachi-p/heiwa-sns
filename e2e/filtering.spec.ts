@@ -42,6 +42,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 type FilterLevel = "strict" | "soft" | "normal" | "off";
+type OverThresholdBehavior = "hide" | "fold";
 
 const TIERS = [
   {
@@ -89,11 +90,17 @@ async function logout(page: Page): Promise<void> {
 }
 
 function toxicityFilterSelect(page: Page) {
-  return page
+  const form = page
     .locator("form")
-    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) })
-    .locator("select")
-    .first();
+    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) });
+  return form.locator("select").first();
+}
+
+function overThresholdBehaviorSelect(page: Page) {
+  const form = page
+    .locator("form")
+    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) });
+  return form.locator("select").nth(1);
 }
 
 async function openProfileEdit(page: Page) {
@@ -120,6 +127,15 @@ async function saveProfileAndClose(page: Page): Promise<void> {
 async function setToxicityFilter(page: Page, level: FilterLevel): Promise<void> {
   await openProfileEdit(page);
   await toxicityFilterSelect(page).selectOption(level);
+  await saveProfileAndClose(page);
+}
+
+async function setOverThresholdBehavior(
+  page: Page,
+  behavior: OverThresholdBehavior
+): Promise<void> {
+  await openProfileEdit(page);
+  await overThresholdBehaviorSelect(page).selectOption(behavior);
   await saveProfileAndClose(page);
 }
 
@@ -216,6 +232,10 @@ test.describe("閲覧フィルタ強度とタイムライン表示", () => {
       await loginEmailPassword(page, u2!, p2!);
     });
 
+    await test.step("TEST_USER2: デフォルト動作として閾値超=非表示を選択", async () => {
+      await setOverThresholdBehavior(page, "hide");
+    });
+
     const levels: FilterLevel[] = ["strict", "soft", "normal", "off"];
 
     for (const level of levels) {
@@ -239,6 +259,36 @@ test.describe("閲覧フィルタ強度とタイムライン表示", () => {
         }
       );
     }
+
+    await test.step(
+      "TEST_USER2: 閾値超=折りたたみで制限カードが出て、展開すると本文が見える",
+      async () => {
+        await setToxicityFilter(page, "strict");
+        await setOverThresholdBehavior(page, "fold");
+        await page.goto("/");
+        await expect(page.locator("main")).toBeVisible();
+
+        // strict では S765 は閾値超なので、本文マーカーは最初は見えない。
+        const severeMarker = markers[3]!;
+        await expect
+          .poll(async () => postWithMarkerVisible(page, severeMarker), {
+            timeout: 45_000,
+            intervals: [500, 1000, 2000],
+          })
+          .toBe(false);
+
+        const foldCard = page.getByText("この投稿は表示が制限されています");
+        await expect(foldCard.first()).toBeVisible({ timeout: 30_000 });
+        await page.getByRole("button", { name: "タップして表示" }).first().click();
+
+        await expect
+          .poll(async () => postWithMarkerVisible(page, severeMarker), {
+            timeout: 30_000,
+            intervals: [500, 1000],
+          })
+          .toBe(true);
+      }
+    );
 
     await test.step("TEST_USER2: ログアウト", async () => {
       await logout(page);
