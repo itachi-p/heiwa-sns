@@ -23,7 +23,7 @@ export function NicknameRequiredModal({
 
   return (
     <div
-      className="fixed inset-0 z-[48] flex items-center justify-center bg-black/45 p-4"
+      className="fixed inset-0 z-[51] flex items-center justify-center bg-black/45 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="nickname-required-title"

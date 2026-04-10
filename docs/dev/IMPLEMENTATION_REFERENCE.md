@@ -85,13 +85,17 @@ virtualSortMs = created_ms
 | 領域 | 主なファイル |
 |------|----------------|
 | ログイン UI（Google ＋ メール／パスワード） | `components/site-header.tsx` |
-| タイムライン取得・フィルタ・呼び出し | `app/page.tsx`（`fetchPosts`） |
+| タイムライン取得・フィルタ・呼び出し | `app/(main)/page.tsx`（`fetchPosts`） |
 | 並び純関数 | `lib/timeline-sort.ts` |
 | 毒性閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | 匿名時の閾値 | `lib/timeline-threshold.ts` |
 | 5 指標（DB + キャッシュ） | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/persist-moderation-dev-scores-client.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/pending-second-moderation.ts`, `lib/second-moderation-timing.ts` |
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |
-| アクティビティ | `app/home/activity/page.tsx`（対象投稿リンク `→ /home?post={id}`、`app/home/page.tsx` で `home-post-{id}` へスクロール）。相対時刻 `lib/format-relative-time-ja.ts`、冒頭プレビュー `lib/post-content-preview.ts` |
+| アクティビティ | `app/(main)/home/activity/page.tsx`（投稿プレビューは `/home?post={id}` へ、`app/(main)/home/page.tsx` で `home-post-{id}` へスクロール）。相対時刻 `lib/format-relative-time-ja.ts`、プレビュー `lib/post-content-preview.ts`。開いたとき `users.activity_last_seen_at` を更新 |
+| 閲覧フィルタ UI | `app/(main)/settings/page.tsx` |
+| 下部ナビ・招待コードモーダル | `app/(main)/layout.tsx`, `components/main-bottom-nav.tsx`, `components/invite-onboarding-layer.tsx` |
+| Google 等の招待コード紐付け | `app/api/invite-bind/route.ts` |
 | 招待サインアップ API | `app/api/invite-signup/route.ts` |
+| プロフィール外部リンク検証 | `lib/sanitize-external-url.ts` |
 | 初回パスワード変更 UI | `components/must-change-password-modal.tsx`, `lib/invite-password.ts`, `lib/invite-label.ts` |

@@ -12,6 +12,7 @@ import Link from "next/link";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
+import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import { ReplyThread } from "@/components/reply-thread";
@@ -159,6 +160,8 @@ export default function Home() {
   >(null);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [inviteLabel, setInviteLabel] = useState<string | null>(null);
+  const [inviteOnboardingCompleted, setInviteOnboardingCompleted] =
+    useState(true);
   /** users.toxicity_filter_level（タイムライン・リプの閾値は TOXICITY_THRESHOLDS で導出） */
   const [toxicityFilterLevel, setToxicityFilterLevel] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
@@ -247,10 +250,13 @@ export default function Home() {
 
   const needsPasswordChange =
     Boolean(userId) && profileReady && mustChangePassword;
+  const needsInviteOnboarding =
+    Boolean(userId) && profileReady && !inviteOnboardingCompleted;
   const needsNickname =
     Boolean(userId) &&
     profileReady &&
     !needsPasswordChange &&
+    !needsInviteOnboarding &&
     profileNickname === null;
 
   useEffect(() => {
@@ -262,6 +268,12 @@ export default function Home() {
     const t = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    const open = () => setComposeOpen(true);
+    window.addEventListener(COMPOSE_OPEN_EVENT, open);
+    return () => window.removeEventListener(COMPOSE_OPEN_EVENT, open);
+  }, []);
 
   useEffect(() => {
     if (!composePostImage) {
@@ -900,6 +912,7 @@ export default function Home() {
         setProfileNickname(null);
         setMustChangePassword(false);
         setInviteLabel(null);
+        setInviteOnboardingCompleted(true);
         setNicknameDraft("");
       });
       return;
@@ -914,7 +927,7 @@ export default function Home() {
       const { data, error } = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label"
+          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label, invite_onboarding_completed"
         )
         .eq("id", userId)
         .maybeSingle();
@@ -929,6 +942,12 @@ export default function Home() {
       setMustChangePassword(Boolean(data?.must_change_password));
       setInviteLabel(
         typeof data?.invite_label === "string" ? data.invite_label : null
+      );
+      setInviteOnboardingCompleted(
+        Boolean(
+          (data as { invite_onboarding_completed?: boolean } | null)
+            ?.invite_onboarding_completed
+        )
       );
       setProfileNickname(nick);
       setProfileAvatarUrl(data?.avatar_url ?? null);
@@ -962,7 +981,13 @@ export default function Home() {
   }, [authReady, userId, profileReady, toxicityFilterLevel]);
 
   useEffect(() => {
-    if (!userId || !profileReady || needsNickname || needsPasswordChange) {
+    if (
+      !userId ||
+      !profileReady ||
+      needsNickname ||
+      needsPasswordChange ||
+      needsInviteOnboarding
+    ) {
       if (!userId) {
         startTransition(() => setLikedPostIds(new Set()));
       }
@@ -976,7 +1001,13 @@ export default function Home() {
         console.error("likes fetch error:", err);
       }
     })();
-  }, [userId, profileReady, needsNickname, needsPasswordChange]);
+  }, [
+    userId,
+    profileReady,
+    needsNickname,
+    needsPasswordChange,
+    needsInviteOnboarding,
+  ]);
 
   const signOut = async () => {
     setErrorMessage(null);
@@ -991,6 +1022,7 @@ export default function Home() {
     setProfilePlaceholderHex(null);
     setMustChangePassword(false);
     setInviteLabel(null);
+    setInviteOnboardingCompleted(true);
     setProfileReady(false);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
     setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
@@ -1016,6 +1048,7 @@ export default function Home() {
       .update({
         nickname: result.value,
         avatar_placeholder_hex: hex,
+        nickname_locked: true,
       })
       .eq("id", userId);
 
@@ -1023,7 +1056,7 @@ export default function Home() {
       savedPlaceholderHex = null;
       ({ error } = await supabase
         .from("users")
-        .update({ nickname: result.value })
+        .update({ nickname: result.value, nickname_locked: true })
         .eq("id", userId));
     }
 
@@ -1050,7 +1083,8 @@ export default function Home() {
       setErrorMessage("ログインしてください。");
       return;
     }
-    if (needsNickname || needsPasswordChange) return;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding)
+      return;
     const content = (replyDrafts[postId] ?? "").trim();
     if (!content) return;
     if (replySubmittingPostId != null) return;
@@ -1315,7 +1349,8 @@ export default function Home() {
       setComposeFormError("ログインしてください。");
       return;
     }
-    if (needsNickname || needsPasswordChange) return;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding)
+      return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
@@ -1522,7 +1557,8 @@ export default function Home() {
     Boolean(userId) &&
     profileReady &&
     !needsNickname &&
-    !needsPasswordChange;
+    !needsPasswordChange &&
+    !needsInviteOnboarding;
 
   /** スキ・返信・投稿など。ブロック時はモーダル用メッセージを返す */
   const interactionBlockedMessage = (): string | null => {
@@ -1539,7 +1575,8 @@ export default function Home() {
   };
 
   const tryInteraction = (): boolean => {
-    if (needsNickname || needsPasswordChange) return false;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding)
+      return false;
     const msg = interactionBlockedMessage();
     if (msg) {
       setAuthGateModal({ open: true, message: msg });

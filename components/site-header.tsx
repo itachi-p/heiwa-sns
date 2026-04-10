@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import React, { useEffect, useState, type FormEvent } from "react";
 import type { User } from "@supabase/supabase-js";
 import { UserAvatar } from "@/components/user-avatar";
@@ -94,7 +92,6 @@ export function SiteHeader({
   avatarPlaceholderHex,
   onSignOut,
 }: SiteHeaderProps) {
-  const pathname = usePathname();
   const userId = user?.id ?? null;
 
   const [loginModalOpen, setLoginModalOpen] = useState(false);
@@ -280,37 +277,6 @@ export function SiteHeader({
           <p className="mt-1 text-xs leading-snug text-gray-600 sm:text-sm">
             「数」に追われる荒波から、穏やかな支流へ
           </p>
-          {authReady ? (
-            <nav
-              className="mt-2 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-sm"
-              aria-label="画面切り替え"
-            >
-              {pathname === "/" ? (
-                <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-                  タイムライン
-                </span>
-              ) : (
-                <Link
-                  href="/"
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-                >
-                  タイムライン
-                </Link>
-              )}
-              {pathname.startsWith("/home") ? (
-                <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-                  ホーム
-                </span>
-              ) : (
-                <Link
-                  href="/home"
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-                >
-                  ホーム
-                </Link>
-              )}
-            </nav>
-          ) : null}
         </div>
       </header>
 

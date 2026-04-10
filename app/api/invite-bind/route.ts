@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import { generateInviteLabel } from "@/lib/invite-label";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
-type Body = {
-  email?: unknown;
-  password?: unknown;
-  inviteToken?: unknown;
-};
+type Body = { inviteToken?: unknown };
 
 function badRequest(error: string) {
   return NextResponse.json({ error }, { status: 400 });
 }
 
+/** ログイン済みユーザーが招待コードを消費する（Google OAuth 初回など） */
 export async function POST(req: Request) {
   let body: Body;
   try {
@@ -20,13 +18,19 @@ export async function POST(req: Request) {
     return badRequest("invalid json");
   }
 
-  const email = typeof body.email === "string" ? body.email.trim() : "";
-  const password = typeof body.password === "string" ? body.password : "";
   const inviteToken =
     typeof body.inviteToken === "string" ? body.inviteToken.trim() : "";
+  if (!inviteToken) {
+    return badRequest("inviteToken is required");
+  }
 
-  if (!email || !password || !inviteToken) {
-    return badRequest("email, password, inviteToken are required");
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user?.id) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
   let admin;
@@ -37,6 +41,19 @@ export async function POST(req: Request) {
       { error: "server misconfigured (service role)" },
       { status: 503 }
     );
+  }
+
+  const { data: row, error: fetchErr } = await admin
+    .from("users")
+    .select("invite_onboarding_completed")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (fetchErr) {
+    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  }
+  if (row?.invite_onboarding_completed) {
+    return badRequest("すでに招待コードは登録済みです。");
   }
 
   const { data: tokenRow, error: tokenErr } = await admin
@@ -52,22 +69,13 @@ export async function POST(req: Request) {
     return badRequest("招待コードが無効です。");
   }
 
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: false,
-  });
-  if (createErr || !created.user?.id) {
-    return badRequest(createErr?.message ?? "新規登録に失敗しました。");
-  }
-
   const { data: consumed, error: consumeErr } = await admin
     .from("invite_tokens")
     .update({
       is_used: true,
       used_at: new Date().toISOString(),
-      used_by_user_id: created.user.id,
-      used_by_email: email,
+      used_by_user_id: user.id,
+      used_by_email: user.email ?? "",
     })
     .eq("id", tokenRow.id)
     .eq("is_used", false)
@@ -75,25 +83,20 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (consumeErr || !consumed) {
-    // race 等でトークン消費に失敗した場合は作成ユーザーを戻す
-    await admin.auth.admin.deleteUser(created.user.id).catch(() => {
-      /* best effort */
-    });
     return badRequest("招待コードが無効です。");
   }
 
-  const uid = created.user.id;
   for (let attempt = 0; attempt < 10; attempt++) {
     const inviteLabel = generateInviteLabel();
     const { error: profileErr } = await admin
       .from("users")
       .update({
         is_invite_user: true,
-        must_change_password: false,
-        invite_label: inviteLabel,
         invite_onboarding_completed: true,
+        invite_label: inviteLabel,
       })
-      .eq("id", uid);
+      .eq("id", user.id);
+
     if (!profileErr) {
       return NextResponse.json({ ok: true });
     }
@@ -102,18 +105,12 @@ export async function POST(req: Request) {
     if (code === "23505" || msg.includes("duplicate") || msg.includes("unique")) {
       continue;
     }
-    await admin.auth.admin.deleteUser(uid).catch(() => {
-      /* best effort */
-    });
     return NextResponse.json(
       { error: profileErr.message ?? "プロフィールの更新に失敗しました。" },
       { status: 500 }
     );
   }
 
-  await admin.auth.admin.deleteUser(uid).catch(() => {
-    /* best effort */
-  });
   return NextResponse.json(
     { error: "招待ラベルの採番に失敗しました。もう一度お試しください。" },
     { status: 500 }

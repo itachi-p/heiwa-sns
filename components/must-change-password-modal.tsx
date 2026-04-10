@@ -76,7 +76,7 @@ export function MustChangePasswordModal({
 
   return (
     <div
-      className="fixed inset-0 z-[49] flex items-center justify-center bg-black/45 p-4"
+      className="fixed inset-0 z-[53] flex items-center justify-center bg-black/45 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="must-change-password-title"

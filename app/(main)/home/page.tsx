@@ -24,11 +24,7 @@ import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
-  TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS,
-  TOXICITY_OVER_THRESHOLD_BEHAVIORS,
   thresholdForLevel,
-  TOXICITY_FILTER_LEVEL_LABELS,
-  TOXICITY_FILTER_SELECT_ORDER,
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
@@ -43,6 +39,8 @@ import {
   validateInterestLabelForRegistration,
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
+import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
+import { sanitizeExternalProfileUrl } from "@/lib/sanitize-external-url";
 import {
   canEditOwnPost,
   formatRemainingLabel,
@@ -90,17 +88,6 @@ import {
 const supabase = createClient();
 const HOME_MODERATION_THRESHOLD = 0.7;
 const RELATION_PENALTY_MIN_SCORE = 0.2;
-
-function isMissingOverThresholdBehaviorColumnError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const rec = error as { code?: string; message?: string; details?: string };
-  const joined = `${rec.message ?? ""} ${rec.details ?? ""}`.toLowerCase();
-  return (
-    joined.includes("toxicity_over_threshold_behavior") ||
-    rec.code === "42703" ||
-    rec.code === "PGRST204"
-  );
-}
 
 type Post = {
   id: number;
@@ -167,21 +154,18 @@ export default function HomePage() {
   >(null);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [inviteLabel, setInviteLabel] = useState<string | null>(null);
+  const [inviteOnboardingCompleted, setInviteOnboardingCompleted] =
+    useState(true);
+  const [nicknameLocked, setNicknameLocked] = useState(false);
+  const [profileExternalUrl, setProfileExternalUrl] = useState("");
+  const [externalUrlDraft, setExternalUrlDraft] = useState("");
   const [profileBio, setProfileBio] = useState("");
   const [toxicityFilterLevel, setToxicityFilterLevel] =
-    useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
-  const [toxicityFilterDraft, setToxicityFilterDraft] =
     useState<ToxicityFilterLevel>(DEFAULT_TOXICITY_FILTER_LEVEL);
   const [toxicityOverThresholdBehavior, setToxicityOverThresholdBehavior] =
     useState<ToxicityOverThresholdBehavior>(
       DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
     );
-  const [
-    toxicityOverThresholdBehaviorDraft,
-    setToxicityOverThresholdBehaviorDraft,
-  ] = useState<ToxicityOverThresholdBehavior>(
-    DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
-  );
   const [postScoresById, setPostScoresById] = useState(() =>
     loadDevScoresFromLocalStorage(POST_DEV_SCORES_KEY)
   );
@@ -261,10 +245,13 @@ export default function HomePage() {
   const userId = user?.id ?? null;
   const needsPasswordChange =
     Boolean(userId) && profileReady && mustChangePassword;
+  const needsInviteOnboarding =
+    Boolean(userId) && profileReady && !inviteOnboardingCompleted;
   const needsNickname =
     Boolean(userId) &&
     profileReady &&
     !needsPasswordChange &&
+    !needsInviteOnboarding &&
     profileNickname === null;
 
   useEffect(() => {
@@ -276,6 +263,12 @@ export default function HomePage() {
     const t = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    const open = () => setComposeOpen(true);
+    window.addEventListener(COMPOSE_OPEN_EVENT, open);
+    return () => window.removeEventListener(COMPOSE_OPEN_EVENT, open);
+  }, []);
 
   useEffect(() => {
     if (!composePostImage) {
@@ -372,7 +365,7 @@ export default function HomePage() {
     const profileRes = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label"
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label, invite_onboarding_completed, nickname_locked, profile_external_url"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -385,6 +378,9 @@ export default function HomePage() {
       interest_custom_creations_count?: number | null;
       must_change_password?: boolean | null;
       invite_label?: string | null;
+      invite_onboarding_completed?: boolean | null;
+      nickname_locked?: boolean | null;
+      profile_external_url?: string | null;
     };
 
     let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
@@ -392,7 +388,7 @@ export default function HomePage() {
       const fallback = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label"
+          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label, invite_onboarding_completed, nickname_locked, profile_external_url"
         )
         .eq("id", uid)
         .maybeSingle();
@@ -550,6 +546,15 @@ export default function HomePage() {
     setInviteLabel(
       typeof profile?.invite_label === "string" ? profile.invite_label : null
     );
+    setInviteOnboardingCompleted(
+      Boolean(profile?.invite_onboarding_completed)
+    );
+    setNicknameLocked(Boolean(profile?.nickname_locked));
+    const extUrl =
+      typeof profile?.profile_external_url === "string"
+        ? profile.profile_external_url.trim()
+        : "";
+    setProfileExternalUrl(extUrl);
     setProfileNickname(nickname);
     setProfileAvatarUrl(avatarUrl);
     setProfilePlaceholderHex(placeholderHex);
@@ -560,8 +565,7 @@ export default function HomePage() {
     setInterestPicksServer(picks);
     if (!profileEditOpenRef.current) {
       setInterestDraft(picks);
-      setToxicityFilterDraft(filterLevel);
-      setToxicityOverThresholdBehaviorDraft(overBehavior);
+      setExternalUrlDraft(extUrl);
     }
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
@@ -841,6 +845,10 @@ export default function HomePage() {
       setProfileNickname(null);
       setMustChangePassword(false);
       setInviteLabel(null);
+      setInviteOnboardingCompleted(true);
+      setNicknameLocked(false);
+      setProfileExternalUrl("");
+      setExternalUrlDraft("");
       setProfilePlaceholderHex(null);
       setPosts([]);
       setRepliesByPost({});
@@ -850,11 +858,7 @@ export default function HomePage() {
       setReplyParentReplyId(null);
       setEditingReplyId(null);
       setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
-      setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
       setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
-      setToxicityOverThresholdBehaviorDraft(
-        DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
-      );
       return;
     }
 
@@ -879,6 +883,10 @@ export default function HomePage() {
     setProfilePlaceholderHex(null);
     setMustChangePassword(false);
     setInviteLabel(null);
+    setInviteOnboardingCompleted(true);
+    setNicknameLocked(false);
+    setProfileExternalUrl("");
+    setExternalUrlDraft("");
     setProfileBio("");
     setPresetRows([]);
     setInterestPicksServer([]);
@@ -897,11 +905,7 @@ export default function HomePage() {
     setReplyParentReplyId(null);
     setEditingReplyId(null);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
-    setToxicityFilterDraft(DEFAULT_TOXICITY_FILTER_LEVEL);
     setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
-    setToxicityOverThresholdBehaviorDraft(
-      DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR
-    );
   };
 
   const handleDeletePost = async (
@@ -981,7 +985,7 @@ export default function HomePage() {
 
   const handleReplySubmit = async (postId: number) => {
     if (!userId) return;
-    if (needsNickname || needsPasswordChange) return;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
     const content = (replyDrafts[postId] ?? "").trim();
     if (!content) return;
     if (replySubmittingPostId != null) return;
@@ -1172,10 +1176,12 @@ export default function HomePage() {
     Boolean(userId) &&
     profileReady &&
     !needsNickname &&
-    !needsPasswordChange;
+    !needsPasswordChange &&
+    !needsInviteOnboarding;
 
   const tryInteraction = (): boolean => {
-    if (needsNickname || needsPasswordChange) return false;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding)
+      return false;
     if (!userId) {
       setErrorMessage("ログインしてください。");
       return false;
@@ -1190,7 +1196,7 @@ export default function HomePage() {
   const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) return;
-    if (needsNickname || needsPasswordChange) return;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
     const textContent = draft.trim();
     if (!textContent && !composePostImage) return;
     if (!textContent && composePostImage) {
@@ -1370,9 +1376,19 @@ export default function HomePage() {
     e.preventDefault();
     if (!userId) return;
 
-    const result = validateNickname(nicknameDraft);
-    if (!result.ok) {
-      setErrorMessage(result.message);
+    let nicknameValue: string | undefined;
+    if (!nicknameLocked) {
+      const result = validateNickname(nicknameDraft);
+      if (!result.ok) {
+        setErrorMessage(result.message);
+        return;
+      }
+      nicknameValue = result.value;
+    }
+
+    const urlSan = sanitizeExternalProfileUrl(externalUrlDraft);
+    if (!urlSan.ok) {
+      setErrorMessage(urlSan.message);
       return;
     }
 
@@ -1409,13 +1425,14 @@ export default function HomePage() {
 
     const hex =
       profilePlaceholderHex ?? pickAvatarPlaceholderHex();
-    const baseUpdate = {
-      nickname: result.value,
+    const baseUpdate: Record<string, unknown> = {
       bio: bioDraft.trim(),
       interest_custom_creations_count: customCreationsUsed,
-      toxicity_filter_level: toxicityFilterDraft,
-      toxicity_over_threshold_behavior: toxicityOverThresholdBehaviorDraft,
+      profile_external_url: urlSan.href || null,
     };
+    if (nicknameValue != null) {
+      baseUpdate.nickname = nicknameValue;
+    }
     const patch = !profilePlaceholderHex
       ? { ...baseUpdate, avatar_placeholder_hex: hex }
       : baseUpdate;
@@ -1426,19 +1443,6 @@ export default function HomePage() {
     if (error && isMissingAvatarPlaceholderHexError(error) && appliedHex != null) {
       appliedHex = null;
       ({ error } = await supabase.from("users").update(baseUpdate).eq("id", userId));
-    }
-    if (error && isMissingOverThresholdBehaviorColumnError(error)) {
-      const legacyBase = {
-        nickname: result.value,
-        bio: bioDraft.trim(),
-        interest_custom_creations_count: customCreationsUsed,
-        toxicity_filter_level: toxicityFilterDraft,
-      };
-      const legacyPatch =
-        appliedHex != null
-          ? { ...legacyBase, avatar_placeholder_hex: appliedHex }
-          : legacyBase;
-      ({ error } = await supabase.from("users").update(legacyPatch).eq("id", userId));
     }
 
     if (error) {
@@ -1453,10 +1457,11 @@ export default function HomePage() {
       return;
     }
 
-    setProfileNickname(result.value);
+    if (nicknameValue != null) {
+      setProfileNickname(nicknameValue);
+    }
     setProfileBio(bioDraft.trim());
-    setToxicityFilterLevel(toxicityFilterDraft);
-    setToxicityOverThresholdBehavior(toxicityOverThresholdBehaviorDraft);
+    setProfileExternalUrl(urlSan.href);
     if (appliedHex) {
       setProfilePlaceholderHex(appliedHex);
     }
@@ -1485,6 +1490,7 @@ export default function HomePage() {
       .update({
         nickname: result.value,
         avatar_placeholder_hex: hex,
+        nickname_locked: true,
       })
       .eq("id", userId);
 
@@ -1492,7 +1498,7 @@ export default function HomePage() {
       savedPlaceholderHex = null;
       ({ error } = await supabase
         .from("users")
-        .update({ nickname: result.value })
+        .update({ nickname: result.value, nickname_locked: true })
         .eq("id", userId));
     }
 
@@ -1511,6 +1517,7 @@ export default function HomePage() {
     setProfileNickname(result.value);
     setProfilePlaceholderHex(savedPlaceholderHex);
     setNicknameDraft(result.value);
+    setNicknameLocked(true);
     await fetchOwnPosts(userId);
   };
 
@@ -1520,8 +1527,7 @@ export default function HomePage() {
         setInterestDraft([...interestPicksServer]);
         setInterestSearchQuery("");
         setInterestConfirm(null);
-        setToxicityFilterDraft(toxicityFilterLevel);
-        setToxicityOverThresholdBehaviorDraft(toxicityOverThresholdBehavior);
+        setExternalUrlDraft(profileExternalUrl);
       }
       return !prev;
     });
@@ -1739,7 +1745,11 @@ export default function HomePage() {
       />
 
       <div className="mx-auto max-w-xl p-4 sm:p-6">
-        {userId && profileReady && !needsPasswordChange && !needsNickname ? (
+        {userId &&
+        profileReady &&
+        !needsPasswordChange &&
+        !needsNickname &&
+        !needsInviteOnboarding ? (
           <section className="mb-4 text-sm text-gray-700">
             <div className="flex min-w-0 items-start gap-3">
               <UserAvatar
@@ -1753,28 +1763,52 @@ export default function HomePage() {
                   <p className="min-w-0 truncate text-lg font-semibold text-gray-800">
                     {profileNickname ?? "ニックネーム未設定"}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => toggleProfileEdit()}
-                    className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 sm:p-0 sm:px-2 sm:py-1"
-                    aria-label="プロフィールを編集"
-                    title="プロフィールを編集"
-                  >
-                    <svg
-                      className="h-4 w-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-400"
+                      title="シェア機能は未実装です"
+                      aria-label="シェア機能未実装"
                     >
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                    <span className="hidden text-xs sm:inline">編集</span>
-                  </button>
+                      <svg
+                        className="h-3.5 w-3.5 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        aria-hidden="true"
+                      >
+                        <circle cx="18" cy="5" r="3" />
+                        <circle cx="6" cy="12" r="3" />
+                        <circle cx="18" cy="19" r="3" />
+                        <path d="M8.59 13.51l6.83 3.98M15.41 6.51l-6.82 3.98" />
+                      </svg>
+                      <span className="hidden sm:inline">未実装</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleProfileEdit()}
+                      className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50 sm:p-0 sm:px-2 sm:py-1"
+                      aria-label="プロフィールを編集"
+                      title="プロフィールを編集"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                      <span className="hidden text-xs sm:inline">編集</span>
+                    </button>
+                  </div>
                 </div>
                 {profileBio ? (
                   <p className="whitespace-pre-wrap text-sm text-gray-700">
@@ -1794,6 +1828,18 @@ export default function HomePage() {
                     ))}
                   </div>
                 ) : null}
+                {profileExternalUrl.trim() ? (
+                  <p className="pt-0.5 text-sm">
+                    <a
+                      href={profileExternalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all font-medium text-sky-800 hover:text-sky-950 hover:underline"
+                    >
+                      {profileExternalUrl}
+                    </a>
+                  </p>
+                ) : null}
               </div>
             </div>
           </section>
@@ -1811,6 +1857,16 @@ export default function HomePage() {
                     登録日: {joinedAtLabel ?? "不明"}
                   </p>
                 </div>
+                <p className="text-xs text-gray-500">
+                  閲覧フィルタの強さは{" "}
+                  <Link
+                    href="/settings"
+                    className="font-medium text-sky-800 underline-offset-2 hover:underline"
+                  >
+                    設定
+                  </Link>
+                  から変更できます。
+                </p>
                 <div className="flex flex-wrap items-center gap-3">
                   <label
                     className="cursor-pointer"
@@ -1842,8 +1898,14 @@ export default function HomePage() {
                       setNicknameDraft(e.target.value.replace(/[\n\r]/g, ""))
                     }
                     maxLength={20}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                    disabled={nicknameLocked}
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100"
                   />
+                  {nicknameLocked ? (
+                    <p className="text-xs text-gray-500">
+                      先行体験の間はニックネームは変更できません。
+                    </p>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
@@ -1859,46 +1921,19 @@ export default function HomePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
-                    表示フィルタ
+                    外部リンク（任意）
                   </label>
-                  <select
-                    value={toxicityFilterDraft}
-                    onChange={(e) =>
-                      setToxicityFilterDraft(
-                        e.target.value as ToxicityFilterLevel
-                      )
-                    }
-                    className="w-full max-w-md rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  >
-                    {TOXICITY_FILTER_SELECT_ORDER.map((v) => (
-                      <option key={v} value={v}>
-                        {TOXICITY_FILTER_LEVEL_LABELS[v]}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="url"
+                    value={externalUrlDraft}
+                    onChange={(e) => setExternalUrlDraft(e.target.value)}
+                    maxLength={500}
+                    placeholder="https://example.com"
+                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                  />
                   <p className="text-xs text-gray-500">
-                    攻撃性の高い投稿や返信の見え方を調整します。この設定は他のユーザーには表示されません。
+                    https:// で始まる URL のみ登録できます。
                   </p>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-gray-600">
-                    閾値超コンテンツの表示方法
-                  </label>
-                  <select
-                    value={toxicityOverThresholdBehaviorDraft}
-                    onChange={(e) =>
-                      setToxicityOverThresholdBehaviorDraft(
-                        e.target.value as ToxicityOverThresholdBehavior
-                      )
-                    }
-                    className="w-full max-w-md rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  >
-                    {TOXICITY_OVER_THRESHOLD_BEHAVIORS.map((v) => (
-                      <option key={v} value={v}>
-                        {TOXICITY_OVER_THRESHOLD_BEHAVIOR_LABELS[v]}
-                      </option>
-                    ))}
-                  </select>
                 </div>
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-gray-600">
@@ -1992,10 +2027,7 @@ export default function HomePage() {
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
                       setBioDraft(profileBio);
-                      setToxicityFilterDraft(toxicityFilterLevel);
-                      setToxicityOverThresholdBehaviorDraft(
-                        toxicityOverThresholdBehavior
-                      );
+                      setExternalUrlDraft(profileExternalUrl);
                       setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
@@ -2032,7 +2064,11 @@ export default function HomePage() {
           <p className="text-gray-600">ホームを読み込み中…</p>
         ) : null}
 
-        {userId && profileReady && !needsPasswordChange && !needsNickname ? (
+        {userId &&
+        profileReady &&
+        !needsPasswordChange &&
+        !needsNickname &&
+        !needsInviteOnboarding ? (
           <section>
             <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
               <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
@@ -2045,9 +2081,7 @@ export default function HomePage() {
                 アクティビティ
               </Link>
             </nav>
-            <h2 className="mb-3 text-sm font-semibold text-gray-700">
-              あなたの投稿（新しい順）
-            </h2>
+            <div className="mb-4 border-t border-gray-200" role="separator" />
             {composeOpen ? (
               <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form

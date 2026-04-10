@@ -36,6 +36,10 @@
 | toxicity_filter_level | text | `strict` / `soft` / `normal` / `off`。閾値はアプリ定数で解釈 |
 | toxicity_over_threshold_behavior | text | `hide` / `fold`。閾値超コンテンツを非表示にするか折りたたむか |
 | interest_custom_creations_count | int 等 | マイグレーション参照 |
+| invite_onboarding_completed | boolean | 招待コード紐付け完了（メール新規登録 API か `POST /api/invite-bind` で true） |
+| nickname_locked | boolean | true のときニックネーム変更不可（初回確定後・先行体験中など） |
+| profile_external_url | text | 任意。プロフィール用外部リンク（https のみ・アプリ側で検証） |
+| activity_last_seen_at | timestamptz | 任意。アクティビティを最後に開いた時刻（未読比較用） |
 
 ### `public.posts`
 

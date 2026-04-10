@@ -213,6 +213,11 @@ export default function HomeActivityPage() {
     );
     setErrorMessage(null);
     setLoading(false);
+
+    void supabase
+      .from("users")
+      .update({ activity_last_seen_at: new Date().toISOString() })
+      .eq("id", uid);
   };
 
   useEffect(() => {
@@ -333,10 +338,7 @@ export default function HomeActivityPage() {
                         href={`/home?post=${row.post_id}`}
                         className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"
                       >
-                        <span className="text-[11px] leading-tight text-gray-500">
-                          対象投稿
-                        </span>
-                        <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-snug text-gray-600">
+                        <p className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-snug text-gray-600">
                           {previewPostSnippet(
                             row.post?.pending_content?.trim()
                               ? row.post.pending_content
@@ -346,7 +348,6 @@ export default function HomeActivityPage() {
                       </Link>
                       {folded ? (
                         <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm">
-                          <p className="text-gray-700">この返信は表示が制限されています</p>
                           <button
                             type="button"
                             onClick={() =>
@@ -356,7 +357,7 @@ export default function HomeActivityPage() {
                                 return next;
                               })
                             }
-                            className="mt-1 text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
+                            className="w-full text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
                           >
                             表示制限中（タップで展開）
                           </button>
