@@ -25,6 +25,9 @@
 | id | uuid PK | `auth.users` に紐付け |
 | email | text | |
 | created_at | timestamptz | |
+| is_invite_user | boolean | デフォルト false。招待経路で作成したユーザーなど |
+| must_change_password | boolean | デフォルト false。true のときログイン後にパスワード変更を必須にする |
+| invite_label | text | 任意。非 NULL 値は一意（招待識別用ラベル） |
 | nickname | text | ユニーク等はマイグレーション参照 |
 | avatar_url | text | |
 | avatar_placeholder_hex | text | |
@@ -96,6 +99,14 @@
 | note | text | 配布メモ（任意） |
 | created_at | timestamptz | 作成時刻 |
 
+**SQL 関数（マイグレーションで定義）**
+
+- `generate_invite_token()` … 6 文字の英小文字+数字（衝突チェックはしない）
+- `create_invite_tokens(p_count int)` … 上記で重複しない `token` を `p_count` 件 `insert`
+
+運用例（SQL エディタ・`service_role` 相当）: `select create_invite_tokens(10);`  
+一覧: `select * from invite_tokens order by created_at desc;`
+
 ### `public.user_affinity`
 
 「スキ」で更新する **ユーザー間** の累積重み（タイムライン順の補助。投稿ごとの人気指標は持たない）。製品説明では「親密度」という語は使わない（人を数字で評価しない方針）。Supabase のテーブルコメントも同趣旨。
@@ -119,3 +130,5 @@
 | 2026-04-12 | `users` から `timeline_toxicity_threshold` / `reply_toxicity_threshold` を削除（閲覧は `toxicity_filter_level` のみ）。`user_affinity` に中立なテーブルコメント。 |
 | 2026-04-13 | `users.toxicity_over_threshold_behavior` を追加（`hide`/`fold`）。 |
 | 2026-04-13 | `invite_tokens` を追加（招待トークンの1回利用管理）。 |
+| 2026-04-14 | `generate_invite_token` / `create_invite_tokens` を追加（トークン一括生成）。 |
+| 2026-04-10 | `users` に `is_invite_user` / `must_change_password` / `invite_label` を追加。 |
