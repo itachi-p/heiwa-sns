@@ -58,6 +58,7 @@ virtualSortMs = created_ms
 - **投稿にいいね数は表示しない**（集計カラムも持たない方針）。
 - `likes` テーブル: `user_id`, `post_id`, `created_at`（重複防止）。
 - タイムライン優先度に効くのは **`user_affinity.like_score`**（ユーザー間の減衰付き累積）。詳細は `supabase/migrations/` 内 RPC 定義。
+- トップ `app/page.tsx` の「スキ」成功後は **タイムライン全体の `fetchPosts` を呼ばない**（スクロールが先頭に戻るのを防ぐ）。`user_affinity` 反映後の並びは、次の一覧取得・ポーリングで追従する。
 
 ---
 

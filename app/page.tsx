@@ -1498,7 +1498,7 @@ export default function Home() {
       next.add(postId);
       return next;
     });
-    void fetchPostsRef.current();
+    // 一覧を再 fetch しない（スクロールが先頭に戻るのを防ぐ）。アンスキと同様。
   };
 
   const canInteract =
