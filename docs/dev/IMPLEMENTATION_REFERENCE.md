@@ -92,6 +92,6 @@ virtualSortMs = created_ms
 | 5 指標（DB + キャッシュ） | `lib/moderation-dev-scores-db.ts`, `app/api/persist-moderation-dev-scores/route.ts`, `lib/persist-moderation-dev-scores-client.ts`, `lib/moderation-scores-indexeddb.ts`, `lib/pending-second-moderation.ts`, `lib/second-moderation-timing.ts` |
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |
-| アクティビティ | `app/home/activity/page.tsx` |
+| アクティビティ | `app/home/activity/page.tsx`（対象投稿リンク `→ /home?post={id}`、`app/home/page.tsx` で `home-post-{id}` へスクロール）。相対時刻 `lib/format-relative-time-ja.ts`、冒頭プレビュー `lib/post-content-preview.ts` |
 | 招待サインアップ API | `app/api/invite-signup/route.ts` |
 | 初回パスワード変更 UI | `components/must-change-password-modal.tsx`, `lib/invite-password.ts`, `lib/invite-label.ts` |

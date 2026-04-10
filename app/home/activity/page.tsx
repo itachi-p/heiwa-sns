@@ -17,6 +17,8 @@ import {
   thresholdForLevel,
   type ToxicityOverThresholdBehavior,
 } from "@/lib/toxicity-filter-level";
+import { formatRelativeTimeJa } from "@/lib/format-relative-time-ja";
+import { previewPostSnippet } from "@/lib/post-content-preview";
 
 const supabase = createClient();
 
@@ -32,6 +34,7 @@ type ActivityRow = {
     id: number;
     user_id: string;
     content: string;
+    pending_content?: string | null;
   } | null;
   users?: {
     nickname: string | null;
@@ -39,6 +42,44 @@ type ActivityRow = {
     avatar_placeholder_hex?: string | null;
   } | null;
 };
+
+function normalizeJoinedPost(
+  row: ActivityRow & { posts?: unknown }
+): ActivityRow["post"] {
+  const p = row.posts;
+  if (Array.isArray(p)) {
+    const first = p[0] as
+      | {
+          id?: number;
+          user_id?: string;
+          content?: string;
+          pending_content?: string | null;
+        }
+      | undefined;
+    if (!first) return null;
+    return {
+      id: first.id as number,
+      user_id: String(first.user_id ?? ""),
+      content: String(first.content ?? ""),
+      pending_content: first.pending_content ?? null,
+    };
+  }
+  if (p && typeof p === "object" && p !== null && "id" in p) {
+    const o = p as {
+      id: number;
+      user_id?: string;
+      content?: string;
+      pending_content?: string | null;
+    };
+    return {
+      id: o.id,
+      user_id: String(o.user_id ?? ""),
+      content: String(o.content ?? ""),
+      pending_content: o.pending_content ?? null,
+    };
+  }
+  return null;
+}
 
 export default function HomeActivityPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -117,7 +158,7 @@ export default function HomeActivityPage() {
     const { data, error } = await supabase
       .from("post_replies")
       .select(
-        "id, post_id, user_id, content, pending_content, created_at, moderation_max_score, posts!inner(id,user_id,content)"
+        "id, post_id, user_id, content, pending_content, created_at, moderation_max_score, posts!inner(id,user_id,content,pending_content)"
       )
       .eq("posts.user_id", uid)
       .neq("user_id", uid)
@@ -134,7 +175,7 @@ export default function HomeActivityPage() {
     >;
     const mapped: ActivityRow[] = rows.map((r) => ({
       ...r,
-      post: Array.isArray(r.posts) ? r.posts[0] ?? null : null,
+      post: normalizeJoinedPost(r),
     }));
 
     const authorIds = [
@@ -269,19 +310,40 @@ export default function HomeActivityPage() {
                       key={row.id}
                       className="rounded-lg border border-gray-200 bg-white p-4"
                     >
-                      <div className="flex items-center gap-2 text-xs text-gray-500">
-                        <UserAvatar
-                          name={row.users?.nickname ?? null}
-                          avatarUrl={row.users?.avatar_url ?? null}
-                          placeholderHex={row.users?.avatar_placeholder_hex ?? null}
-                        />
-                        <span className="font-medium text-gray-800">
-                          {row.users?.nickname ?? "（未設定）"}
-                        </span>
-                        <span>が返信</span>
-                        <span>{row.created_at ? new Date(row.created_at).toLocaleString() : ""}</span>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <UserAvatar
+                            name={row.users?.nickname ?? null}
+                            avatarUrl={row.users?.avatar_url ?? null}
+                            placeholderHex={row.users?.avatar_placeholder_hex ?? null}
+                          />
+                          <span className="font-medium text-gray-800">
+                            {row.users?.nickname ?? "（未設定）"}
+                          </span>
+                          <span className="shrink-0">が返信</span>
+                        </div>
+                        <time
+                          className="shrink-0 text-gray-400"
+                          dateTime={row.created_at ?? undefined}
+                        >
+                          {formatRelativeTimeJa(row.created_at)}
+                        </time>
                       </div>
-                      <p className="mt-2 text-xs text-gray-500">対象投稿: {row.post?.content ?? ""}</p>
+                      <Link
+                        href={`/home?post=${row.post_id}`}
+                        className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"
+                      >
+                        <span className="text-[11px] leading-tight text-gray-500">
+                          対象投稿
+                        </span>
+                        <p className="mt-1 line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-snug text-gray-600">
+                          {previewPostSnippet(
+                            row.post?.pending_content?.trim()
+                              ? row.post.pending_content
+                              : row.post?.content
+                          ) || "（本文なし）"}
+                        </p>
+                      </Link>
                       {folded ? (
                         <div className="mt-2 rounded-md border border-amber-100 bg-amber-50/60 px-3 py-2 text-sm">
                           <p className="text-gray-700">この返信は表示が制限されています</p>
@@ -296,7 +358,7 @@ export default function HomeActivityPage() {
                             }
                             className="mt-1 text-left text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900"
                           >
-                            タップして表示
+                            表示制限中（タップで展開）
                           </button>
                         </div>
                       ) : (

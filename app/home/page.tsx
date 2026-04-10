@@ -619,6 +619,21 @@ export default function HomePage() {
   }, [authReady, userId, profileReady, hasPendingContent]);
 
   useEffect(() => {
+    if (posts.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("post");
+    if (!raw) return;
+    const id = Number(raw);
+    if (!Number.isFinite(id)) return;
+    const el = document.getElementById(`home-post-${id}`);
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    window.history.replaceState(null, "", "/home");
+  }, [posts]);
+
+  useEffect(() => {
     if (!authReady || !profileReady || !userId) return;
     let cancelled = false;
 
@@ -2189,6 +2204,7 @@ export default function HomePage() {
                 {posts.map((post) => (
                   <li
                     key={post.id}
+                    id={`home-post-${post.id}`}
                     className="break-words rounded-lg border border-gray-200 bg-white p-4"
                   >
                     <div className="mb-1 flex min-w-0 items-start justify-between gap-2">
