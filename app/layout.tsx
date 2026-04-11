@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nagi SNS（仮名）",
+  title: "Nagi SNS",
   description: "穏やかな支流のようなSNS",
   manifest: "/manifest.json",
   icons: {

@@ -45,6 +45,14 @@ virtualSortMs = created_ms
 
 ---
 
+## 1.4 入力文字数（クライアント先行）
+
+- 定数: `lib/compose-text-limits.ts` の `POST_AND_REPLY_MAX_CHARS`（300）・`PROFILE_BIO_MAX_CHARS`（150）。
+- タイムライン投稿・返信の新規・編集・返信モーダル・`ReplyThread` の編集欄で `maxLength` と送信前チェックに使用。自己紹介はマイホームのプロフィール編集で同様。
+- フローティング新規投稿（`/`・`/home`）: 本文なし投稿は `AppToastPortal`（`setToast`）で通知。フロート内 `composeFormError` と併用可。オープン時は `AutosizeTextarea` の ref で `focus({ preventScroll: true })`。空＋画像なしのときは投稿ボタンを `disabled`。
+
+---
+
 ## 2. 毒性・UI メッセージ（投稿者向け注意など）
 
 - 投稿・返信直後の投稿者向け注意: `overallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD`。値は **`TOXICITY_THRESHOLDS.normal`（標準・0.7）と同一**（`lib/toxicity-filter-level.ts`）。文言・表示形式は `lib/visibility-notice.ts` および `app/page.tsx` / `app/home/page.tsx` の既存定数のまま。

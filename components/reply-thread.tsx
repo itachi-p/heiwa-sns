@@ -12,6 +12,7 @@ import {
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
+import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import {
   effectiveScoreForViewerToxicityFilter,
   type ToxicityOverThresholdBehavior,
@@ -204,7 +205,7 @@ function ReplyItem({
             value={editReplyDraft}
             onChange={(e) => onEditDraftChange(e.target.value)}
             maxRows={10}
-            maxLength={2000}
+            maxLength={POST_AND_REPLY_MAX_CHARS}
             disabled={replyEditSaving}
             className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
           />

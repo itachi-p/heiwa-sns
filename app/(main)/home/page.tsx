@@ -41,6 +41,10 @@ import {
   normalizeInterestInput,
   validateInterestLabelForRegistration,
 } from "@/lib/interests";
+import {
+  POST_AND_REPLY_MAX_CHARS,
+  PROFILE_BIO_MAX_CHARS,
+} from "@/lib/compose-text-limits";
 import { validateNickname } from "@/lib/nickname";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { requestOpenSettings } from "@/components/settings-open-bus";
@@ -192,6 +196,7 @@ export default function HomePage() {
     label: string;
     insertsRemaining: number;
   } | null>(null);
+  const [interestPickerOpen, setInterestPickerOpen] = useState(false);
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
@@ -219,6 +224,7 @@ export default function HomePage() {
   const [composeImagePreviewUrl, setComposeImagePreviewUrl] = useState<
     string | null
   >(null);
+  const composeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
     "perspective"
@@ -272,6 +278,14 @@ export default function HomePage() {
     window.addEventListener(COMPOSE_OPEN_EVENT, open);
     return () => window.removeEventListener(COMPOSE_OPEN_EVENT, open);
   }, []);
+
+  useEffect(() => {
+    if (!composeOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      composeTextareaRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [composeOpen]);
 
   useEffect(() => {
     if (!composePostImage) {
@@ -572,7 +586,11 @@ export default function HomePage() {
     }
     setCustomCreationsUsed(creations);
     setNicknameDraft(nickname ?? "");
-    setBioDraft(bio);
+    setBioDraft(
+      bio.length > PROFILE_BIO_MAX_CHARS
+        ? bio.slice(0, PROFILE_BIO_MAX_CHARS)
+        : bio
+    );
 
     const warn = [catalogWarning, uiWarning].filter(Boolean).join(" ");
     setErrorMessage(warn || null);
@@ -822,6 +840,10 @@ export default function HomePage() {
   }, [profileEditOpen]);
 
   useEffect(() => {
+    if (!profileEditOpen) setInterestPickerOpen(false);
+  }, [profileEditOpen]);
+
+  useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
@@ -964,6 +986,13 @@ export default function HomePage() {
       });
       return;
     }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
+      return;
+    }
     setPostEditSaving(true);
     setErrorMessage(null);
     let error: { message: string } | null = null;
@@ -1002,6 +1031,13 @@ export default function HomePage() {
     const content = (replyDrafts[postId] ?? "").trim();
     if (!content) {
       setToast({ message: "返信を入力してください。", tone: "error" });
+      return;
+    }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `返信は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
       return;
     }
     if (replySubmittingPostId != null) return;
@@ -1168,6 +1204,13 @@ export default function HomePage() {
       });
       return;
     }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `返信は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
+      return;
+    }
     setReplyEditSaving(true);
     setErrorMessage(null);
     const { error } = await supabase
@@ -1264,9 +1307,21 @@ export default function HomePage() {
     if (!userId) return;
     if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
     const textContent = draft.trim();
-    if (!textContent && !composePostImage) return;
+    if (!textContent && !composePostImage) {
+      setComposeFormError(null);
+      setToast({ message: "投稿内容を入力してください。", tone: "error" });
+      return;
+    }
     if (!textContent && composePostImage) {
-      setComposeFormError("画像を添付する場合は本文を入力してください。");
+      const msg = "画像を添付する場合は本文を入力してください。";
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
+      return;
+    }
+    if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
+      const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
 
@@ -1296,7 +1351,9 @@ export default function HomePage() {
           }
         | null;
       if (!moderationRes.ok) {
-        setComposeFormError(moderationJson?.error ?? "AI判定に失敗しました。");
+        const msg = moderationJson?.error ?? "AI判定に失敗しました。";
+        setComposeFormError(msg);
+        setToast({ message: msg, tone: "error" });
         setSubmitting(false);
         return;
       }
@@ -1331,7 +1388,9 @@ export default function HomePage() {
       .single();
 
     if (error) {
-      setComposeFormError(error.message);
+      const msg = error.message;
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       setSubmitting(false);
       return;
     }
@@ -1351,6 +1410,7 @@ export default function HomePage() {
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", inserted.id);
         setComposeFormError(up.message);
+        setToast({ message: up.message, tone: "error" });
         setSubmitting(false);
         return;
       }
@@ -1362,7 +1422,9 @@ export default function HomePage() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", inserted.id);
-        setComposeFormError(updErr.message);
+        const msg = updErr.message;
+        setComposeFormError(msg);
+        setToast({ message: msg, tone: "error" });
         setSubmitting(false);
         return;
       }
@@ -1455,6 +1517,13 @@ export default function HomePage() {
     const urlSan = sanitizeExternalProfileUrl(externalUrlDraft);
     if (!urlSan.ok) {
       setErrorMessage(urlSan.message);
+      return;
+    }
+
+    if (bioDraft.length > PROFILE_BIO_MAX_CHARS) {
+      setErrorMessage(
+        `自己紹介は${PROFILE_BIO_MAX_CHARS}文字以内にしてください。`
+      );
       return;
     }
 
@@ -1593,6 +1662,7 @@ export default function HomePage() {
         setInterestDraft([...interestPicksServer]);
         setInterestSearchQuery("");
         setInterestConfirm(null);
+        setInterestPickerOpen(false);
         setExternalUrlDraft(profileExternalUrl);
       }
       return !prev;
@@ -1708,6 +1778,7 @@ export default function HomePage() {
         const labelPick = labelResolved ?? value;
         addPickById(eid, labelPick);
         mergeCatalogPick({ id: eid, label: labelPick });
+        setInterestPickerOpen(false);
         return;
       }
 
@@ -1772,6 +1843,7 @@ export default function HomePage() {
         const raceResolved = raceLabel ?? interestConfirm.label;
         addPickById(rid, raceResolved);
         mergeCatalogPick({ id: rid, label: raceResolved });
+        setInterestPickerOpen(false);
         finish();
         return;
       }
@@ -1795,6 +1867,7 @@ export default function HomePage() {
       addPickById(inserted.id, inserted.label);
       mergeCatalogPick({ id: inserted.id, label: inserted.label });
     }
+    setInterestPickerOpen(false);
     finish();
   };
 
@@ -1912,176 +1985,159 @@ export default function HomePage() {
         ) : null}
 
         {profileEditOpen ? (
-          <div className="fixed inset-0 z-[70] bg-black/35 p-4">
-            <div className="mx-auto mt-10 w-full max-w-xl rounded-lg border border-gray-200 bg-white p-4 shadow-xl">
-              <form onSubmit={handleProfileSave} className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold text-gray-800">
-                    プロフィール編集
-                  </h3>
-                  <p className="text-xs text-gray-500">
-                    登録日: {joinedAtLabel ?? "不明"}
-                  </p>
-                </div>
-                <p className="text-xs text-gray-500">
-                  閲覧フィルタの強さは{" "}
-                  <button
-                    type="button"
-                    className="font-medium text-sky-800 underline-offset-2 hover:underline"
-                    onClick={() => requestOpenSettings()}
-                  >
-                    設定
-                  </button>
-                  から変更できます。
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <label
-                    className="cursor-pointer"
-                    title={avatarUploading ? "アップロード中..." : "画像を変更"}
-                  >
-                    <UserAvatar
-                      name={profileNickname}
-                      avatarUrl={profileAvatarUrl}
-                      placeholderHex={profilePlaceholderHex}
-                      size="lg"
-                    />
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="hidden"
-                      disabled={avatarUploading}
-                      onChange={(e) => void handleAvatarUpload(e)}
-                    />
-                  </label>
-                  <span className="text-xs text-gray-500">
-                    1MB以下 / PNG JPG WEBP GIF
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-gray-600">名前</label>
-                  <input
-                    value={nicknameDraft}
-                    onChange={(e) =>
-                      setNicknameDraft(e.target.value.replace(/[\n\r]/g, ""))
-                    }
-                    maxLength={20}
-                    disabled={nicknameLocked}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100"
-                  />
-                  {nicknameLocked ? (
-                    <p className="text-xs text-gray-500">
-                      先行体験の間はニックネームは変更できません。
-                    </p>
-                  ) : null}
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-gray-600">
-                    自己紹介
-                  </label>
-                  <textarea
-                    value={bioDraft}
-                    onChange={(e) => setBioDraft(e.target.value)}
-                    maxLength={200}
-                    rows={3}
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-gray-600">
-                    外部リンク（任意）
-                  </label>
-                  <input
-                    type="url"
-                    value={externalUrlDraft}
-                    onChange={(e) => setExternalUrlDraft(e.target.value)}
-                    maxLength={500}
-                    placeholder="https://example.com"
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                  />
-                  <p className="text-xs text-gray-500">
-                    https:// で始まる URL のみ登録できます。
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-gray-600">
-                    趣味・関心（上位{MAX_INTEREST_TAGS}つまで）
-                  </label>
-                  <p className="text-xs text-gray-500">
-                    検索結果リストにない言葉は「＋」から追加できます。
-                  </p>
-                  <div className="flex min-h-[1.75rem] flex-wrap gap-1.5">
-                    {interestDraft.map((pick) => (
-                      <span
-                        key={pick.id}
-                        className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900"
-                      >
-                        {pick.label}
-                        <button
-                          type="button"
-                          className="rounded px-0.5 text-blue-700 hover:bg-blue-200/80"
-                          aria-label={`${pick.label}を削除`}
-                          onClick={() => removeInterestPick(pick.id)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={interestSearchQuery}
-                      onChange={(e) => {
-                        setInterestSearchQuery(
-                          e.target.value.replace(/[\n\r]/g, "")
-                        );
-                        setInterestConfirm(null);
-                      }}
-                      maxLength={MAX_CUSTOM_INTEREST_LEN}
-                      disabled={
-                        interestDraft.length >= MAX_INTEREST_TAGS ||
-                        interestConfirm != null
-                      }
-                      placeholder="キーワードで検索"
-                      className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-100"
-                    />
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-lg font-medium leading-none text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                      disabled={
-                        interestDraft.length >= MAX_INTEREST_TAGS ||
-                        !normalizeInterestInput(interestSearchQuery) ||
-                        presetSearchHits.length > 0 ||
-                        interestConfirm != null ||
-                        interestPlusPending
-                      }
-                      title="検索で0件のときだけ、入力中の言葉を追加できます"
-                      onClick={() => void handleInterestPlusClick()}
+          <div
+            className="fixed inset-0 z-[70] flex items-end justify-center bg-black/35 p-0 sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-edit-title"
+          >
+            <div
+              className="flex min-h-0 max-h-[min(92dvh,40rem)] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-xl ring-1 ring-black/5 sm:max-h-[min(88dvh,36rem)] sm:rounded-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <form
+                onSubmit={handleProfileSave}
+                className="flex min-h-0 flex-1 flex-col"
+              >
+                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-gray-100 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <h3
+                      id="profile-edit-title"
+                      className="text-sm font-semibold text-gray-900"
                     >
-                      ＋
-                    </button>
+                      プロフィール編集
+                    </h3>
+                    <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
+                      登録日 {joinedAtLabel ?? "不明"}
+                      <span className="text-gray-300"> · </span>
+                      閲覧フィルタは
+                      <button
+                        type="button"
+                        className="mx-0.5 font-medium text-sky-800 underline-offset-2 hover:underline"
+                        onClick={() => requestOpenSettings()}
+                      >
+                        設定
+                      </button>
+                      から
+                    </p>
                   </div>
-                  {normalizeInterestInput(interestSearchQuery) &&
-                  presetSearchHits.length > 0 ? (
-                    <ul className="max-h-36 overflow-y-auto rounded-md border border-gray-200 bg-gray-50 text-sm">
-                      {presetSearchHits.map((pick) => (
-                        <li key={pick.id}>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+                  <div className="space-y-4">
+                    <div className="flex gap-3">
+                      <label
+                        className="shrink-0 cursor-pointer self-start"
+                        title={
+                          avatarUploading ? "アップロード中..." : "画像を変更"
+                        }
+                      >
+                        <UserAvatar
+                          name={profileNickname}
+                          avatarUrl={profileAvatarUrl}
+                          placeholderHex={profilePlaceholderHex}
+                          size="lg"
+                        />
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          className="hidden"
+                          disabled={avatarUploading}
+                          onChange={(e) => void handleAvatarUpload(e)}
+                        />
+                      </label>
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                          <span className="text-xs font-medium text-gray-700">
+                            名前
+                          </span>
+                          {nicknameLocked ? (
+                            <span className="text-[11px] text-gray-500">
+                              ※先行体験期間中は名前を変更できません
+                            </span>
+                          ) : null}
+                        </div>
+                        <input
+                          value={nicknameDraft}
+                          onChange={(e) =>
+                            setNicknameDraft(
+                              e.target.value.replace(/[\n\r]/g, "")
+                            )
+                          }
+                          maxLength={20}
+                          disabled={nicknameLocked}
+                          className="w-full border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:text-gray-500"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        自己紹介
+                      </label>
+                      <AutosizeTextarea
+                        value={bioDraft}
+                        onChange={(e) => setBioDraft(e.target.value)}
+                        maxRows={8}
+                        maxLength={PROFILE_BIO_MAX_CHARS}
+                        className="mt-1 w-full resize-none overflow-hidden border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm leading-snug outline-none focus:border-blue-500"
+                      />
+                      <p className="mt-0.5 text-right text-[11px] text-gray-400">
+                        {bioDraft.length}/{PROFILE_BIO_MAX_CHARS}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+                        <label className="text-xs font-medium text-gray-700">
+                          外部リンク（任意）
+                        </label>
+                        <span className="text-[11px] text-gray-500">
+                          ※httpsのみ対応
+                        </span>
+                      </div>
+                      <input
+                        type="url"
+                        value={externalUrlDraft}
+                        onChange={(e) => setExternalUrlDraft(e.target.value)}
+                        maxLength={500}
+                        placeholder="https://example.com"
+                        className="mt-1 w-full border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        趣味・関心（最大{MAX_INTEREST_TAGS}つ）
+                      </label>
+                      <div className="mt-1.5 flex min-h-[1.75rem] flex-wrap items-center gap-1.5">
+                        {interestDraft.length < MAX_INTEREST_TAGS ? (
                           <button
                             type="button"
-                            className="w-full px-3 py-2 text-left hover:bg-white"
-                            onClick={() => addPresetPick(pick)}
-                            disabled={
-                              interestDraft.length >= MAX_INTEREST_TAGS
-                            }
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-lg font-medium text-gray-700 hover:bg-gray-200"
+                            aria-label="趣味・関心を追加"
+                            onClick={() => setInterestPickerOpen(true)}
+                          >
+                            ＋
+                          </button>
+                        ) : null}
+                        {interestDraft.map((pick) => (
+                          <span
+                            key={pick.id}
+                            className="inline-flex items-center gap-1 rounded-full bg-blue-100/90 px-2 py-0.5 text-xs font-medium text-blue-900"
                           >
                             {pick.label}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
+                            <button
+                              type="button"
+                              className="rounded px-0.5 text-blue-700 hover:bg-blue-200/80"
+                              aria-label={`${pick.label}を削除`}
+                              onClick={() => removeInterestPick(pick.id)}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 gap-2 border-t border-gray-100 px-4 py-2.5">
                   <button
                     type="submit"
                     disabled={profileSaving}
@@ -2093,19 +2149,121 @@ export default function HomePage() {
                     type="button"
                     onClick={() => {
                       setNicknameDraft(profileNickname ?? "");
-                      setBioDraft(profileBio);
+                      setBioDraft(
+                        profileBio.length > PROFILE_BIO_MAX_CHARS
+                          ? profileBio.slice(0, PROFILE_BIO_MAX_CHARS)
+                          : profileBio
+                      );
                       setExternalUrlDraft(profileExternalUrl);
                       setInterestDraft([...interestPicksServer]);
                       setInterestSearchQuery("");
                       setInterestConfirm(null);
+                      setInterestPickerOpen(false);
                       setProfileEditOpen(false);
                     }}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    className="rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                   >
                     キャンセル
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        ) : null}
+
+        {profileEditOpen && interestPickerOpen ? (
+          <div
+            className="fixed inset-0 z-[75] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4"
+            role="presentation"
+            onClick={() => {
+              if (!interestConfirm) setInterestPickerOpen(false);
+            }}
+          >
+            <div
+              className="flex min-h-0 max-h-[min(88dvh,28rem)] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-xl ring-1 ring-black/5 sm:rounded-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="interest-picker-title"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-3 py-2">
+                <h4
+                  id="interest-picker-title"
+                  className="text-sm font-semibold text-gray-900"
+                >
+                  趣味・関心を追加
+                </h4>
+                <button
+                  type="button"
+                  className="rounded-full p-1 text-lg leading-none text-gray-500 hover:bg-gray-100"
+                  aria-label="閉じる"
+                  onClick={() => setInterestPickerOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+                <p className="mb-2 text-[11px] leading-snug text-gray-500">
+                  キーワードで候補を絞り込みます。一覧にない語は「＋」から追加できます。
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={interestSearchQuery}
+                    onChange={(e) => {
+                      setInterestSearchQuery(
+                        e.target.value.replace(/[\n\r]/g, "")
+                      );
+                      setInterestConfirm(null);
+                    }}
+                    maxLength={MAX_CUSTOM_INTEREST_LEN}
+                    disabled={
+                      interestDraft.length >= MAX_INTEREST_TAGS ||
+                      interestConfirm != null
+                    }
+                    placeholder="キーワードで検索"
+                    className="min-w-0 flex-1 border-0 border-b border-gray-200 bg-transparent px-0 py-2 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 self-end rounded-full bg-gray-100 px-3 py-1.5 text-base font-medium text-gray-800 hover:bg-gray-200 disabled:opacity-40"
+                    disabled={
+                      interestDraft.length >= MAX_INTEREST_TAGS ||
+                      !normalizeInterestInput(interestSearchQuery) ||
+                      presetSearchHits.length > 0 ||
+                      interestConfirm != null ||
+                      interestPlusPending
+                    }
+                    title="検索で0件のときだけ、入力中の言葉を追加できます"
+                    onClick={() => void handleInterestPlusClick()}
+                  >
+                    {interestPlusPending ? "…" : "＋"}
+                  </button>
+                </div>
+                {normalizeInterestInput(interestSearchQuery) &&
+                presetSearchHits.length > 0 ? (
+                  <ul className="mt-2 max-h-40 overflow-y-auto text-sm">
+                    {presetSearchHits.map((pick) => (
+                      <li
+                        key={pick.id}
+                        className="border-b border-gray-100 last:border-0"
+                      >
+                        <button
+                          type="button"
+                          className="w-full px-1 py-2 text-left hover:bg-gray-50"
+                          onClick={() => {
+                            addPresetPick(pick);
+                            setInterestPickerOpen(false);
+                          }}
+                          disabled={interestDraft.length >= MAX_INTEREST_TAGS}
+                        >
+                          {pick.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </div>
           </div>
         ) : null}
@@ -2139,10 +2297,10 @@ export default function HomePage() {
           <section>
             <div className="mb-4 border-t border-gray-200" role="separator" />
             {composeOpen ? (
-              <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
+              <div className="touch-manipulation fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form
                   onSubmit={handleSubmitPost}
-                  className="mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
+                  className="touch-manipulation mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
                 >
                 {composeFormError?.trim() ? (
                   <div
@@ -2154,11 +2312,15 @@ export default function HomePage() {
                 ) : null}
                 <div className="flex items-end gap-2">
                   <AutosizeTextarea
+                    ref={composeTextareaRef}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     placeholder="いまどうしてる？"
                     maxRows={12}
+                    maxLength={POST_AND_REPLY_MAX_CHARS}
                     disabled={submitting}
+                    autoComplete="off"
+                    enterKeyHint="send"
                     className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
                   />
                   <ImageAttachIconButton
@@ -2168,6 +2330,7 @@ export default function HomePage() {
                         const r = await preparePostImageForUpload(file);
                         if (!r.ok) {
                           setComposeFormError(r.message);
+                          setToast({ message: r.message, tone: "error" });
                           return;
                         }
                         setComposeFormError(null);
@@ -2203,7 +2366,9 @@ export default function HomePage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="submit"
-                    disabled={submitting}
+                    disabled={
+                      submitting || (!draft.trim() && !composePostImage)
+                    }
                     className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                   >
                     {submitting ? "投稿中..." : "投稿"}
@@ -2327,6 +2492,7 @@ export default function HomePage() {
                           value={editDraft}
                           onChange={(e) => setEditDraft(e.target.value)}
                           maxRows={14}
+                          maxLength={POST_AND_REPLY_MAX_CHARS}
                           disabled={postEditSaving}
                           className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
                         />
@@ -2494,7 +2660,7 @@ export default function HomePage() {
         onClick={() => setInterestConfirm(null)}
       >
         <div
-          className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-4 shadow-xl"
+          className="max-h-[min(90dvh,24rem)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white p-4 shadow-xl"
           role="dialog"
           aria-modal="true"
           aria-labelledby="interest-confirm-lead"

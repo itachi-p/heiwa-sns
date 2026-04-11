@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  forwardRef,
+  useCallback,
   useLayoutEffect,
   useRef,
   type TextareaHTMLAttributes,
@@ -11,17 +13,26 @@ export type AutosizeTextareaProps =
     maxRows?: number;
   };
 
-export function AutosizeTextarea({
-  className = "",
-  maxRows = 14,
-  value,
-  onChange,
-  ...rest
-}: AutosizeTextareaProps) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+export const AutosizeTextarea = forwardRef<
+  HTMLTextAreaElement,
+  AutosizeTextareaProps
+>(function AutosizeTextarea(
+  { className = "", maxRows = 14, value, onChange, ...rest },
+  ref
+) {
+  const innerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const setRefs = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      innerRef.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) ref.current = el;
+    },
+    [ref]
+  );
 
   useLayoutEffect(() => {
-    const el = ref.current;
+    const el = innerRef.current;
     if (!el) return;
     el.style.height = "auto";
     const style = getComputedStyle(el);
@@ -37,7 +48,7 @@ export function AutosizeTextarea({
 
   return (
     <textarea
-      ref={ref}
+      ref={setRefs}
       rows={1}
       value={value}
       onChange={onChange}
@@ -45,4 +56,4 @@ export function AutosizeTextarea({
       {...rest}
     />
   );
-}
+});

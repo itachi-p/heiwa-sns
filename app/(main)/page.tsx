@@ -47,6 +47,7 @@ import {
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
+import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import { validateNickname } from "@/lib/nickname";
 import {
   canEditOwnPost,
@@ -229,6 +230,7 @@ export default function Home() {
   const [composeImagePreviewUrl, setComposeImagePreviewUrl] = useState<
     string | null
   >(null);
+  const composeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [authGateModal, setAuthGateModal] = useState<{
     open: boolean;
     message: string;
@@ -278,6 +280,14 @@ export default function Home() {
     window.addEventListener(COMPOSE_OPEN_EVENT, open);
     return () => window.removeEventListener(COMPOSE_OPEN_EVENT, open);
   }, []);
+
+  useEffect(() => {
+    if (!composeOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      composeTextareaRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [composeOpen]);
 
   useEffect(() => {
     if (!composePostImage) {
@@ -1113,6 +1123,13 @@ export default function Home() {
       setToast({ message: "返信を入力してください。", tone: "error" });
       return;
     }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `返信は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
+      return;
+    }
     if (replySubmittingPostId != null) return;
 
     const flat = repliesByPost[postId] ?? [];
@@ -1278,6 +1295,13 @@ export default function Home() {
       });
       return;
     }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `返信は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
+      return;
+    }
     setReplyEditSaving(true);
     setErrorMessage(null);
     const { error } = await supabase
@@ -1338,6 +1362,13 @@ export default function Home() {
       });
       return;
     }
+    if (content.length > POST_AND_REPLY_MAX_CHARS) {
+      setToast({
+        message: `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
+        tone: "error",
+      });
+      return;
+    }
     setPostEditSaving(true);
     setErrorMessage(null);
     let error: { message: string } | null = null;
@@ -1373,15 +1404,29 @@ export default function Home() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) {
-      setComposeFormError("ログインしてください。");
+      const msg = "ログインしてください。";
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
     if (needsNickname || needsPasswordChange || needsInviteOnboarding)
       return;
     const textContent = input.trim();
-    if (!textContent && !composePostImage) return;
+    if (!textContent && !composePostImage) {
+      setComposeFormError(null);
+      setToast({ message: "投稿内容を入力してください。", tone: "error" });
+      return;
+    }
     if (!textContent && composePostImage) {
-      setComposeFormError("画像を添付する場合は本文を入力してください。");
+      const msg = "画像を添付する場合は本文を入力してください。";
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
+      return;
+    }
+    if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
+      const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
 
@@ -1416,7 +1461,9 @@ export default function Home() {
           degradedReason?: string;
         };
         if (!res.ok) {
-          setComposeFormError(json?.error ?? "AI判定に失敗しました。");
+          const msg = json?.error ?? "AI判定に失敗しました。";
+          setComposeFormError(msg);
+          setToast({ message: msg, tone: "error" });
           setPostSubmitting(false);
           return;
         }
@@ -1439,7 +1486,9 @@ export default function Home() {
         postOverallMax = maxFromApi;
       } catch (err) {
         console.error("moderation error:", err);
-        setComposeFormError("AI判定に失敗しました。");
+        const msg = "AI判定に失敗しました。";
+        setComposeFormError(msg);
+        setToast({ message: msg, tone: "error" });
         setPostSubmitting(false);
         return;
       }
@@ -1461,7 +1510,9 @@ export default function Home() {
 
     if (error) {
       console.error("insert error:", error);
-      setComposeFormError(error.message);
+      const msg = error.message;
+      setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       setPostSubmitting(false);
       return;
     }
@@ -1481,6 +1532,7 @@ export default function Home() {
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
         setComposeFormError(up.message);
+        setToast({ message: up.message, tone: "error" });
         setPostSubmitting(false);
         return;
       }
@@ -1492,7 +1544,9 @@ export default function Home() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", data.id);
-        setComposeFormError(updErr.message);
+        const msg = updErr.message;
+        setComposeFormError(msg);
+        setToast({ message: msg, tone: "error" });
         setPostSubmitting(false);
         return;
       }
@@ -1696,10 +1750,10 @@ export default function Home() {
         {authReady && !(userId && !profileReady) ? (
           <>
             {canInteract && composeOpen ? (
-              <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
+              <div className="touch-manipulation fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
                 <form
                   onSubmit={handleSubmit}
-                  className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+                  className="touch-manipulation flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
                 >
                   {composeFormError?.trim() ? (
                     <div
@@ -1711,11 +1765,15 @@ export default function Home() {
                   ) : null}
                   <div className="flex items-end gap-2">
                     <AutosizeTextarea
+                      ref={composeTextareaRef}
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       placeholder="いまどうしてる？"
                       maxRows={12}
+                      maxLength={POST_AND_REPLY_MAX_CHARS}
                       disabled={postSubmitting}
+                      autoComplete="off"
+                      enterKeyHint="send"
                       className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
                     />
                     <ImageAttachIconButton
@@ -1725,6 +1783,7 @@ export default function Home() {
                           const r = await preparePostImageForUpload(file);
                           if (!r.ok) {
                             setComposeFormError(r.message);
+                            setToast({ message: r.message, tone: "error" });
                             return;
                           }
                           setComposeFormError(null);
@@ -1760,7 +1819,10 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={postSubmitting}
+                      disabled={
+                        postSubmitting ||
+                        (!input.trim() && !composePostImage)
+                      }
                       className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                     >
                       {postSubmitting ? "投稿中…" : "投稿"}
@@ -1947,6 +2009,7 @@ export default function Home() {
                         value={editDraft}
                         onChange={(e) => setEditDraft(e.target.value)}
                         maxRows={14}
+                        maxLength={POST_AND_REPLY_MAX_CHARS}
                         disabled={postEditSaving}
                         className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
                       />

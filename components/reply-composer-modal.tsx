@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
+import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { UserAvatar } from "@/components/user-avatar";
 
@@ -78,7 +79,7 @@ export function ReplyComposerModal({
       }}
     >
       <div
-        className="flex max-h-[min(92dvh,36rem)] w-full max-w-lg flex-col rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl"
+        className="flex min-h-0 max-h-[min(92dvh,36rem)] w-full max-w-lg flex-col rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
@@ -101,7 +102,7 @@ export function ReplyComposerModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
           <div className="flex gap-3 border-b border-gray-100 pb-3">
             <UserAvatar
               name={targetNickname}
@@ -128,7 +129,7 @@ export function ReplyComposerModal({
               value={draft}
               onChange={(e) => onDraftChange(e.target.value)}
               maxRows={10}
-              maxLength={2000}
+              maxLength={POST_AND_REPLY_MAX_CHARS}
               disabled={submitting}
               placeholder="返信を入力…"
               autoFocus

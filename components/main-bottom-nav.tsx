@@ -81,7 +81,8 @@ function HomeIcon({ active }: { active: boolean }) {
   );
 }
 
-function SettingsIcon({ active }: { active: boolean }) {
+/** 投稿の見え方（閲覧フィルタ）用 */
+function VisibilityFilterIcon({ active }: { active: boolean }) {
   return (
     <svg
       width="24"
@@ -92,17 +93,19 @@ function SettingsIcon({ active }: { active: boolean }) {
       aria-hidden
     >
       <path
-        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"
+        d="M1 12s4.5-7 11-7 11 7 11 7-4.5 7-11 7S1 12 1 12Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r="3.25"
         stroke="currentColor"
         strokeWidth="1.5"
         fill="none"
-      />
-      <path
-        d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.61V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.61 1.7 1.7 0 0 0-1.87.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.61-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.61-1 1.7 1.7 0 0 0-.34-1.87l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.61V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.61 1.7 1.7 0 0 0 1.87-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05a1.7 1.7 0 0 0-.34 1.87V9c0 .69.41 1.3 1 1.61h.09a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1 1.61z"
-        stroke="currentColor"
-        strokeWidth="0.9"
-        fill="none"
-        opacity="0.9"
       />
     </svg>
   );
@@ -187,12 +190,12 @@ export function MainBottomNav({
         <button
           type="button"
           className={navBtn}
-          title="閲覧フィルタ"
+          title="可視性（閲覧フィルタ）"
           aria-expanded={settingsOpen}
           onClick={() => onOpenSettings?.()}
         >
-          <SettingsIcon active={settingsOpen} />
-          <span className={settingsOpen ? "text-sky-700" : ""}>設定</span>
+          <VisibilityFilterIcon active={settingsOpen} />
+          <span className={settingsOpen ? "text-sky-700" : ""}>可視性</span>
         </button>
       </div>
     </nav>

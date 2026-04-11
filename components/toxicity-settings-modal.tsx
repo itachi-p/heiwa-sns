@@ -100,7 +100,7 @@ export function ToxicitySettingsModal({ open, onClose }: Props) {
       }}
     >
       <div
-        className="flex max-h-[min(88dvh,32rem)] w-full max-w-md flex-col rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[min(85vh,28rem)] sm:rounded-2xl"
+        className="flex min-h-0 max-h-[min(88dvh,32rem)] w-full max-w-md flex-col rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[min(85vh,28rem)] sm:rounded-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="toxicity-settings-title"
@@ -127,7 +127,7 @@ export function ToxicitySettingsModal({ open, onClose }: Props) {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
           <p className="text-sm text-gray-600">
             AIによる攻撃性判定値の処理方法
           </p>
