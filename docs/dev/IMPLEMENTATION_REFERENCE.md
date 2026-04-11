@@ -82,6 +82,7 @@ virtualSortMs = created_ms
 
 - **DB**: `users.is_invite_user` / `users.must_change_password` / `users.invite_label`（`docs/schema.md`・マイグレーション参照）。既存行はデフォルトでゲートに掛からない。
 - **招待メール新規登録**（`/api/invite-signup`）: トークン消費後に `is_invite_user=true`・`must_change_password=false`・`invite_label` を付与（`lib/invite-label.ts` の採番。一意衝突時は再試行）。
+- **ニックネーム未設定**（`needsNickname`）: `users.nickname` が **null・空・空白のみ**のとき `NicknameRequiredModal` を出す（`app/(main)/page.tsx` / `app/(main)/home/page.tsx`）。
 - **貸与アカウント**: 運用で `must_change_password=true`（および必要なら `invite_label`）を付与。初回ログイン後は **`MustChangePasswordModal`**（`components/must-change-password-modal.tsx`）でパスワード変更を必須にし、成功後に `must_change_password=false` を自分の行へ `update`（`supabase.auth.updateUser` と続けて実行）。
 - **強度**: `lib/invite-password.ts`（8 文字以上・英字＋数字）。
 - **表示**: トップ `app/page.tsx`・マイホーム `app/home/page.tsx`・`app/home/activity/page.tsx`・自分の `app/home/[userId]/page.tsx` で `must_change_password===true` の間はニックネーム設定より先に当該モーダルを出し、操作は `canInteract` 相当でブロック（または閲覧を抑止）。

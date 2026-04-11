@@ -258,12 +258,14 @@ export default function Home() {
     Boolean(userId) && profileReady && mustChangePassword;
   const needsInviteOnboarding =
     Boolean(userId) && profileReady && !inviteOnboardingCompleted;
+  const hasUsableNickname =
+    typeof profileNickname === "string" && profileNickname.trim().length > 0;
   const needsNickname =
     Boolean(userId) &&
     profileReady &&
     !needsPasswordChange &&
     !needsInviteOnboarding &&
-    profileNickname === null;
+    !hasUsableNickname;
 
   useEffect(() => {
     if (!needsNickname) setNicknameModalError(null);
