@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
+import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   canEditOwnReply,
@@ -160,9 +161,11 @@ function ReplyItem({
             <button
               type="button"
               onClick={() => onReplyToReply(reply.id)}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-800 hover:bg-gray-50"
+              className="inline-flex items-center justify-center rounded border border-gray-300 bg-white p-1 text-gray-700 hover:bg-gray-50"
+              aria-label="返信"
+              title="返信"
             >
-              返信
+              <ReplyBubbleIcon className="h-4 w-4" />
             </button>
           ) : null}
           {showEdit ? (

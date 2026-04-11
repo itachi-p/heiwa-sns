@@ -93,7 +93,7 @@ virtualSortMs = created_ms
 | E2E | `playwright.config.ts`, `e2e/` |
 | スキーマ意図 | [`../schema.md`](../schema.md), `supabase/migrations/` |
 | アクティビティ | `app/(main)/home/activity/page.tsx`（投稿プレビューは `/home?post={id}` へ、`app/(main)/home/page.tsx` で `home-post-{id}` へスクロール）。相対時刻 `lib/format-relative-time-ja.ts`、プレビュー `lib/post-content-preview.ts`。開いたとき `users.activity_last_seen_at` を更新 |
-| 閲覧フィルタ UI | `app/(main)/settings/page.tsx` |
+| 閲覧フィルタ UI | `components/toxicity-settings-modal.tsx`（`app/(main)/layout.tsx` で表示。`/settings` はモーダル起動＋`/` へ `replace`） |
 | 下部ナビ・招待コードモーダル | `app/(main)/layout.tsx`, `components/main-bottom-nav.tsx`, `components/invite-onboarding-layer.tsx` |
 | Google 等の招待コード紐付け | `app/api/invite-bind/route.ts` |
 | 招待サインアップ API | `app/api/invite-signup/route.ts` |

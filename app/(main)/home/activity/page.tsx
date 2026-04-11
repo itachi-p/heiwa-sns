@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import React, { startTransition, useEffect, useMemo, useState } from "react";
+import React, {
+  startTransition,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { User } from "@supabase/supabase-js";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { SiteHeader } from "@/components/site-header";
@@ -19,6 +25,7 @@ import {
 } from "@/lib/toxicity-filter-level";
 import { formatRelativeTimeJa } from "@/lib/format-relative-time-ja";
 import { previewPostSnippet } from "@/lib/post-content-preview";
+import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 
 const supabase = createClient();
 
@@ -220,6 +227,9 @@ export default function HomeActivityPage() {
       .eq("id", uid);
   };
 
+  const fetchActivityRef = useRef(fetchActivity);
+  fetchActivityRef.current = fetchActivity;
+
   useEffect(() => {
     let cancelled = false;
     if (!userId) {
@@ -239,6 +249,16 @@ export default function HomeActivityPage() {
     return () => {
       cancelled = true;
     };
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const h = () => {
+      void fetchActivityRef.current(userId);
+    };
+    window.addEventListener(VIEWER_TOXICITY_UPDATED_EVENT, h);
+    return () =>
+      window.removeEventListener(VIEWER_TOXICITY_UPDATED_EVENT, h);
   }, [userId]);
 
   const signOut = async () => {
@@ -284,17 +304,6 @@ export default function HomeActivityPage() {
         ) : null}
         {userId && profileReady && !needsPasswordChange ? (
           <section>
-            <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
-              <Link
-                href="/home"
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-              >
-                投稿
-              </Link>
-              <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-                アクティビティ
-              </span>
-            </nav>
             <h2 className="mb-3 text-sm font-semibold text-gray-700">新着アクティビティ</h2>
             {loading ? (
               <p className="text-sm text-gray-500">読み込み中…</p>

@@ -2,8 +2,10 @@
 
 import { InviteOnboardingLayer } from "@/components/invite-onboarding-layer";
 import { MainBottomNav } from "@/components/main-bottom-nav";
+import { SETTINGS_OPEN_EVENT } from "@/components/settings-open-bus";
+import { ToxicitySettingsModal } from "@/components/toxicity-settings-modal";
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export default function MainShellLayout({
   children,
@@ -11,7 +13,17 @@ export default function MainShellLayout({
   children: React.ReactNode;
 }) {
   const [showNav, setShowNav] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const supabase = createClient();
+
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+
+  useEffect(() => {
+    const onOpen = () => openSettings();
+    window.addEventListener(SETTINGS_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(SETTINGS_OPEN_EVENT, onOpen);
+  }, [openSettings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,11 +48,17 @@ export default function MainShellLayout({
 
   return (
     <>
-      <div className="pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="pb-[calc(4.5rem+0.5rem+env(safe-area-inset-bottom,0px))]">
         {children}
       </div>
       <InviteOnboardingLayer />
-      <MainBottomNav show={showNav} activityHasUnread={false} />
+      <ToxicitySettingsModal open={settingsOpen} onClose={closeSettings} />
+      <MainBottomNav
+        show={showNav}
+        activityHasUnread={false}
+        settingsOpen={settingsOpen}
+        onOpenSettings={openSettings}
+      />
     </>
   );
 }

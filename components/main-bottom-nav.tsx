@@ -10,6 +10,10 @@ type NavProps = {
   show: boolean;
   /** アクティビティに未読の可能性（軽量バッジ） */
   activityHasUnread?: boolean;
+  /** 閲覧フィルタモーダルが開いている */
+  settingsOpen?: boolean;
+  /** 設定ボタン押下（モーダルを開く） */
+  onOpenSettings?: () => void;
 };
 
 function TimelineIcon({ active }: { active: boolean }) {
@@ -104,7 +108,12 @@ function SettingsIcon({ active }: { active: boolean }) {
   );
 }
 
-export function MainBottomNav({ show, activityHasUnread }: NavProps) {
+export function MainBottomNav({
+  show,
+  activityHasUnread,
+  settingsOpen = false,
+  onOpenSettings,
+}: NavProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -113,17 +122,16 @@ export function MainBottomNav({ show, activityHasUnread }: NavProps) {
   const isTimeline = pathname === "/";
   const isActivity = pathname === "/home/activity" || pathname.startsWith("/home/activity");
   const isHome = pathname === "/home";
-  const isSettings = pathname === "/settings";
 
   const navBtn =
     "relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-medium text-gray-600 min-h-[52px] max-w-[20%]";
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-[45] border-t border-gray-200/90 bg-white/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-md"
+      className="fixed bottom-2 left-0 right-0 z-[45] border-t border-gray-200/90 bg-white/95 pb-[max(0.375rem,env(safe-area-inset-bottom,0px))] pt-1 backdrop-blur-md"
       aria-label="メイン"
     >
-      <div className="mx-auto flex max-w-lg items-end justify-between px-1 pt-1">
+      <div className="mx-auto flex max-w-lg items-end justify-between px-1">
         <Link
           href="/"
           className={navBtn}
@@ -151,7 +159,7 @@ export function MainBottomNav({ show, activityHasUnread }: NavProps) {
 
         <button
           type="button"
-          className="relative -mt-5 flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-sky-600 text-2xl font-light text-white shadow-lg ring-4 ring-sky-50 hover:bg-sky-700"
+          className="relative -mt-3 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xl font-light leading-none text-white shadow-md ring-2 ring-sky-100 hover:bg-sky-700"
           aria-label="投稿を書く"
           title="投稿"
           onClick={() => {
@@ -176,15 +184,16 @@ export function MainBottomNav({ show, activityHasUnread }: NavProps) {
           <span className={isHome ? "text-sky-700" : ""}>ホーム</span>
         </Link>
 
-        <Link
-          href="/settings"
+        <button
+          type="button"
           className={navBtn}
           title="閲覧フィルタ"
-          aria-current={isSettings ? "page" : undefined}
+          aria-expanded={settingsOpen}
+          onClick={() => onOpenSettings?.()}
         >
-          <SettingsIcon active={isSettings} />
-          <span className={isSettings ? "text-sky-700" : ""}>設定</span>
-        </Link>
+          <SettingsIcon active={settingsOpen} />
+          <span className={settingsOpen ? "text-sky-700" : ""}>設定</span>
+        </button>
       </div>
     </nav>
   );

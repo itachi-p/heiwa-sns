@@ -102,5 +102,5 @@ export const TOXICITY_FILTER_LEVEL_LABELS: Record<ToxicityFilterLevel, string> =
     strict: "厳しめ（安心重視）",
     soft: "やや厳しめ",
     normal: "標準",
-    off: "フィルタしない",
+    off: "オフ",
   };

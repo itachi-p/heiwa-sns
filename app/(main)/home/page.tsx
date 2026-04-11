@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { NicknameRequiredModal } from "@/components/nickname-required-modal";
+import {
+  ReplyComposerModal,
+  ReplyBubbleIcon,
+} from "@/components/reply-composer-modal";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
@@ -40,6 +43,9 @@ import {
 } from "@/lib/interests";
 import { validateNickname } from "@/lib/nickname";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
+import { requestOpenSettings } from "@/components/settings-open-bus";
+import { AppToastPortal } from "@/components/app-toast-portal";
+import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { sanitizeExternalProfileUrl } from "@/lib/sanitize-external-url";
 import {
   canEditOwnPost,
@@ -86,7 +92,6 @@ import {
 } from "@/lib/pending-second-moderation";
 
 const supabase = createClient();
-const HOME_MODERATION_THRESHOLD = 0.7;
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 
 type Post = {
@@ -218,8 +223,6 @@ export default function HomePage() {
   const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
     "perspective"
   );
-  const [blockOnSubmit, setBlockOnSubmit] = useState(true);
-  const [blockThreshold, setBlockThreshold] = useState(HOME_MODERATION_THRESHOLD);
   const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
     string | null
   >(null);
@@ -577,6 +580,16 @@ export default function HomePage() {
 
   const fetchOwnPostsRef = useRef(fetchOwnPosts);
   fetchOwnPostsRef.current = fetchOwnPosts;
+
+  useEffect(() => {
+    if (!userId) return;
+    const reload = () => {
+      void fetchOwnPostsRef.current(userId);
+    };
+    window.addEventListener(VIEWER_TOXICITY_UPDATED_EVENT, reload);
+    return () =>
+      window.removeEventListener(VIEWER_TOXICITY_UPDATED_EVENT, reload);
+  }, [userId]);
 
   const hasPendingContent = useMemo(
     () =>
@@ -987,7 +1000,10 @@ export default function HomePage() {
     if (!userId) return;
     if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
     const content = (replyDrafts[postId] ?? "").trim();
-    if (!content) return;
+    if (!content) {
+      setToast({ message: "返信を入力してください。", tone: "error" });
+      return;
+    }
     if (replySubmittingPostId != null) return;
 
     const flat = repliesByPost[postId] ?? [];
@@ -1087,6 +1103,7 @@ export default function HomePage() {
 
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
+      setReplyComposerPostId(null);
       const targetUserId =
         parentReply?.user_id ??
         posts.find((p) => p.id === postId)?.user_id ??
@@ -1192,6 +1209,55 @@ export default function HomePage() {
     }
     return true;
   };
+
+  const replyModalContext = useMemo(() => {
+    const pid = replyComposerPostId;
+    if (pid == null) return null;
+    const post = posts.find((p) => p.id === pid);
+    if (!post) return null;
+    const flat = repliesByPost[pid] ?? [];
+    const prid = replyParentReplyId;
+    const clip = (t: string) => {
+      const s = t.replace(/\s+/g, " ").trim();
+      return s.length > 280 ? `${s.slice(0, 280)}…` : s;
+    };
+    if (prid != null) {
+      const r = flat.find((x) => x.id === prid);
+      if (!r) return null;
+      const text = resolvePendingVisibleContent(
+        r.content,
+        r.pending_content,
+        r.created_at,
+        nowTick
+      );
+      return {
+        targetNickname: r.users?.nickname ?? null,
+        targetAvatarUrl: r.users?.avatar_url ?? null,
+        targetPlaceholderHex: r.users?.avatar_placeholder_hex ?? null,
+        targetPreview: clip(text),
+      };
+    }
+    const text = resolvePendingVisibleContent(
+      post.content,
+      post.pending_content,
+      post.created_at,
+      nowTick
+    );
+    return {
+      targetNickname: post.users?.nickname ?? null,
+      targetAvatarUrl: post.users?.avatar_url ?? null,
+      targetPlaceholderHex: post.users?.avatar_placeholder_hex ?? null,
+      targetPreview: clip(text),
+    };
+  }, [replyComposerPostId, replyParentReplyId, posts, repliesByPost, nowTick]);
+
+  useEffect(() => {
+    if (replyComposerPostId == null) return;
+    if (replyModalContext == null) {
+      setReplyComposerPostId(null);
+      setReplyParentReplyId(null);
+    }
+  }, [replyComposerPostId, replyModalContext]);
 
   const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1859,12 +1925,13 @@ export default function HomePage() {
                 </div>
                 <p className="text-xs text-gray-500">
                   閲覧フィルタの強さは{" "}
-                  <Link
-                    href="/settings"
+                  <button
+                    type="button"
                     className="font-medium text-sky-800 underline-offset-2 hover:underline"
+                    onClick={() => requestOpenSettings()}
                   >
                     設定
-                  </Link>
+                  </button>
                   から変更できます。
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
@@ -2070,17 +2137,6 @@ export default function HomePage() {
         !needsNickname &&
         !needsInviteOnboarding ? (
           <section>
-            <nav className="mb-3 flex items-center gap-2 text-sm" aria-label="ホーム内タブ">
-              <span className="rounded bg-blue-100 px-2 py-1 font-medium text-blue-700">
-                投稿
-              </span>
-              <Link
-                href="/home/activity"
-                className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:bg-gray-50"
-              >
-                アクティビティ
-              </Link>
-            </nav>
             <div className="mb-4 border-t border-gray-200" role="separator" />
             {composeOpen ? (
               <div className="fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
@@ -2096,67 +2152,6 @@ export default function HomePage() {
                     {composeFormError}
                   </div>
                 ) : null}
-                <details className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-800">
-                    AI判定（テスト用）
-                  </summary>
-                  <div className="mt-3 grid gap-3 text-sm">
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-                      <label className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
-                        <span className="shrink-0 text-gray-600">モード</span>
-                        <select
-                          className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1"
-                          value={moderationMode}
-                          onChange={(e) =>
-                            setModerationMode(
-                              e.target.value as "mock" | "perspective"
-                            )
-                          }
-                        >
-                          <option value="mock">mock（簡易）</option>
-                          <option value="perspective">AI判定</option>
-                        </select>
-                        {moderationMode === "mock" ? (
-                          <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
-                            ※mockモードは特定NGワードのみ検出
-                          </span>
-                        ) : (
-                          <span className="min-w-0 flex-1 text-xs font-semibold text-red-700">
-                            ※AI判定は現状1日の使用量上限あり
-                          </span>
-                        )}
-                      </label>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <label className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={blockOnSubmit}
-                          onChange={(e) => setBlockOnSubmit(e.target.checked)}
-                        />
-                        <span className="text-gray-700">
-                          スコアが高い場合は投稿を保留（テスト用）
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <span className="text-gray-600">閾値</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={1}
-                          step={0.05}
-                          value={blockThreshold}
-                          onChange={(e) =>
-                            setBlockThreshold(
-                              Math.max(0, Math.min(1, Number(e.target.value)))
-                            )
-                          }
-                          className="w-24 rounded border border-gray-300 bg-white px-2 py-1"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </details>
                 <div className="flex items-end gap-2">
                   <AutosizeTextarea
                     value={draft}
@@ -2378,25 +2373,14 @@ export default function HomePage() {
                         type="button"
                         onClick={() => {
                           if (!tryInteraction()) return;
-                          if (replyComposerPostId === post.id) {
-                            setReplyComposerPostId(null);
-                            setReplyParentReplyId(null);
-                          } else {
-                            setReplyComposerPostId(post.id);
-                            setReplyParentReplyId(null);
-                          }
+                          setReplyComposerPostId(post.id);
+                          setReplyParentReplyId(null);
                         }}
-                        className={[
-                          "rounded-md border px-3 py-1 text-sm font-medium transition-colors",
-                          replyComposerPostId === post.id
-                            ? "border-blue-400 bg-blue-50 text-blue-800"
-                            : "border-gray-300 bg-white text-gray-800 hover:bg-gray-50",
-                        ].join(" ")}
-                        aria-expanded={replyComposerPostId === post.id}
+                        className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
+                        aria-label="返信"
+                        title="返信"
                       >
-                        {replyComposerPostId === post.id
-                          ? "返信を閉じる"
-                          : "返信"}
+                        <ReplyBubbleIcon />
                       </button>
                     </div>
                     {(repliesByPost[post.id] ?? []).length > 0 ? (
@@ -2441,85 +2425,42 @@ export default function HomePage() {
                         })()}
                       </div>
                     ) : null}
-                    {canInteract && replyComposerPostId === post.id ? (
-                      <div className="mt-3 border-t border-gray-100 pt-3">
-                        {replyParentReplyId != null ? (
-                          <p className="mb-2 text-xs text-gray-600">
-                            選択した返信への返信を入力しています。
-                          </p>
-                        ) : null}
-                        <AutosizeTextarea
-                          value={replyDrafts[post.id] ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setReplyDrafts((prev) => ({
-                              ...prev,
-                              [post.id]: v,
-                            }));
-                          }}
-                          maxRows={10}
-                          maxLength={2000}
-                          placeholder={
-                            replyParentReplyId != null
-                              ? "この返信への返信を入力…"
-                              : "返信を入力…"
-                          }
-                          autoFocus
-                          className="mb-2 min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={replySubmittingPostId === post.id}
-                            onClick={() => void handleReplySubmit(post.id)}
-                            className="rounded-md bg-gray-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-900 disabled:opacity-50"
-                          >
-                            {replySubmittingPostId === post.id
-                              ? "送信中…"
-                              : "返信する"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={replySubmittingPostId === post.id}
-                            onClick={() => {
-                              setReplyComposerPostId(null);
-                              setReplyParentReplyId(null);
-                            }}
-                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                          >
-                            キャンセル
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
-            <button
-              type="button"
-              disabled={interestConfirm != null}
-              onClick={() =>
-                setComposeOpen((prev) => {
-                  if (prev) {
-                    setComposeFormError(null);
-                    setDraft("");
-                    setComposePostImage(null);
-                  } else {
-                    setComposeFormError(null);
-                  }
-                  return !prev;
-                })
-              }
-              className="fixed bottom-5 right-5 z-[10001] inline-flex h-12 w-12 items-center justify-center rounded-full border border-blue-200 bg-blue-600 text-2xl font-semibold text-white shadow-lg hover:bg-blue-700 disabled:pointer-events-none disabled:opacity-30"
-              aria-label="投稿フォームを開く"
-              title="投稿"
-            >
-              {composeOpen ? "×" : "+"}
-            </button>
           </section>
         ) : null}
       </div>
+
+      {canInteract &&
+      replyComposerPostId != null &&
+      replyModalContext != null ? (
+        <ReplyComposerModal
+          open
+          onClose={() => {
+            if (replySubmittingPostId != null) return;
+            setReplyComposerPostId(null);
+            setReplyParentReplyId(null);
+          }}
+          onSubmit={() => void handleReplySubmit(replyComposerPostId)}
+          submitting={replySubmittingPostId === replyComposerPostId}
+          draft={replyDrafts[replyComposerPostId] ?? ""}
+          onDraftChange={(v) =>
+            setReplyDrafts((prev) => ({
+              ...prev,
+              [replyComposerPostId]: v,
+            }))
+          }
+          targetNickname={replyModalContext.targetNickname}
+          targetAvatarUrl={replyModalContext.targetAvatarUrl}
+          targetPlaceholderHex={replyModalContext.targetPlaceholderHex}
+          targetPreview={replyModalContext.targetPreview}
+          viewerNickname={profileNickname}
+          viewerAvatarUrl={profileAvatarUrl}
+          viewerPlaceholderHex={profilePlaceholderHex}
+        />
+      ) : null}
 
       <MustChangePasswordModal
         open={Boolean(userId && profileReady && needsPasswordChange)}
@@ -2542,19 +2483,7 @@ export default function HomePage() {
       />
 
       {toast?.message?.trim() ? (
-        <div
-          className={[
-            "pointer-events-none fixed left-1/2 z-[10002] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-center text-sm text-white shadow-lg",
-            "top-[calc(env(safe-area-inset-top,0px)+1.75rem)] lg:top-auto lg:bottom-24",
-            toast.tone === "error"
-              ? "border-red-400/80 bg-red-900"
-              : "border-gray-200 bg-gray-900",
-          ].join(" ")}
-          role="status"
-          aria-live="polite"
-        >
-          {toast.message}
-        </div>
+        <AppToastPortal message={toast.message} tone={toast.tone} />
       ) : null}
 
     </main>

@@ -24,3 +24,10 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* iOS 等のダブルタップ拡大を抑え、返信ボタン・モーダル周りの意図しないズームを防ぐ */
+button,
+[role="button"],
+[role="switch"] {
+  touch-action: manipulation;
+}
