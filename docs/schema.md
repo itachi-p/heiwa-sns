@@ -20,6 +20,8 @@
 
 ### `public.users`
 
+**サーバー API**（`/api/invite-signup`・`/api/invite-bind` 等）が `createAdminClient()`（`service_role` JWT）で行を更新するため、**`service_role` に対する `select` / `update` の明示 GRANT**（`20260416110000`）がある。
+
 | 列 | 型 | 備考 |
 |----|-----|------|
 | id | uuid PK | `auth.users` に紐付け |
@@ -90,17 +92,17 @@
 
 ### `public.invite_tokens`
 
-先行テストの招待コード管理。`token` が未使用 (`is_used=false`) の場合のみ登録に利用する。
+先行テストの招待コード管理。`token` が未使用 (`is_used=false`) の場合のみ登録に利用する。`anon` / `authenticated` からは `revoke all`。**サーバー API**（`/api/invite-signup` 等）は **`service_role` に対する `select` / `update` の明示 GRANT**（`20260416100000`）で参照する。
 
 | 列 | 型 | 備考 |
 |----|-----|------|
 | id | bigint PK | identity |
 | token | text | 一意な招待トークン |
 | is_used | boolean | 1回使用後 true |
-| used_at | timestamptz | 使用時刻 |
+| used_at | timestamptz | 使用時刻。**DB は UTC の絶対時刻**（`timestamptz`）。SQL エディタ等は `+00` 表示になりやすい。日本の現地は **UTC+9h**（例: `2026-04-11 15:36+00` ≈ **JST 4/12 0:36**）。運用で JST だけ見たいときは `used_at at time zone 'Asia/Tokyo'` などで投影する。 |
 | used_by_user_id | uuid | 使用した `auth.users.id` |
 | used_by_email | text | 使用メール |
-| note | text | 配布メモ（任意） |
+| note | text | **運用メモ**（任意）。誰向けのコードか・バッチ名などを SQL 発行時に手で入れる想定。`create_invite_tokens` は `token` のみ insert のため **既定は NULL**。アプリ API は現状読み書きしない。 |
 | created_at | timestamptz | 作成時刻 |
 
 **SQL 関数（マイグレーションで定義）**
@@ -135,4 +137,6 @@
 | 2026-04-13 | `users.toxicity_over_threshold_behavior` を追加（`hide`/`fold`）。 |
 | 2026-04-13 | `invite_tokens` を追加（招待トークンの1回利用管理）。 |
 | 2026-04-14 | `generate_invite_token` / `create_invite_tokens` を追加（トークン一括生成）。 |
+| 2026-04-16 | `invite_tokens` を `service_role` に `grant select, update`（招待サインアップ API 用）。 |
+| 2026-04-16 | `users` を `service_role` に `grant select, update`（招待サインアップ・invite-bind 用）。 |
 | 2026-04-10 | `users` に `is_invite_user` / `must_change_password` / `invite_label` を追加。 |
