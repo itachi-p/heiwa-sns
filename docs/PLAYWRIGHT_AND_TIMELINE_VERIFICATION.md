@@ -65,6 +65,8 @@
 
 **Supabase / ログインが必要なシナリオ**を E2E に書く場合は、`.env.local` の有無・テスト用アカウント・CI のシークレットなどを別途設計する（現状の `e2e/smoke.spec.ts` は未ログインのトップ表示のみ）。**`e2e/filtering.spec.ts`** は閲覧フィルタの帯を確定させるため、テスト用投稿の `moderation_max_score` を **`SUPABASE_SERVICE_ROLE_KEY` で上書き**する（`NEXT_PUBLIC_SUPABASE_URL` も必要）。API の自動採点だけでは帯が揺れるため。
 
+- **`e2e/invite-flow.spec.ts`**（先行体験 **3番**: 貸与メール＋パスでログイン → 必要なら招待・初回パス変更・ニックネーム → 初投稿）: 必須 **`E2E_LOGIN_EMAIL`** / **`E2E_LOGIN_PASSWORD`**。任意 **`INVITE_CODE`**（招待未紐付けユーザ向け）、**`E2E_FIRST_LOGIN_NEW_PASSWORD`**（`must_change_password` 時の初回変更）。未設定でスキップになるのはメール／パスだけ。例: `E2E_LOGIN_EMAIL=user02@test.com E2E_LOGIN_PASSWORD=… npm run test:e2e -- e2e/invite-flow.spec.ts`。タイムアウト **120s**、ログイン後モーダルは最大 **約 12s** ずつ検出して分岐。
+
 ---
 
 ## 4. テスト追加の目安
