@@ -64,6 +64,8 @@ test("lent user: login → optional gates → first post on timeline", async ({
     name: "招待コードを入力",
   });
   const composeTrigger = page.getByRole("button", { name: "投稿を書く" });
+  /** `canInteract` が false の間は compose フォームは出ない。+ ボタンだけでは or 待機に使えない */
+  const composeBody = page.getByPlaceholder("いまどうしてる？");
 
   await page.goto("/");
 
@@ -116,19 +118,25 @@ test("lent user: login → optional gates → first post on timeline", async ({
     await expect(inviteHeading).toBeHidden({ timeout: 45_000 });
   }
 
-  await expect(nicknameHeading.or(composeTrigger)).toBeVisible({
-    timeout: 60_000,
-  });
+  try {
+    await nicknameHeading.waitFor({ state: "visible", timeout: 60_000 });
+  } catch {
+    /* ニックネーム未設定でないアカウント（貸与 SQL 未実施など） */
+  }
 
   if (await nicknameHeading.isVisible()) {
-    await page.getByPlaceholder("ニックネーム").fill(nickname);
+    await page
+      .getByRole("dialog", { name: "ニックネームを設定" })
+      .getByPlaceholder("ニックネーム")
+      .fill(nickname);
     await page.getByRole("button", { name: "保存してはじめる" }).click();
     await expect(nicknameHeading).toBeHidden({ timeout: 30_000 });
   }
 
   await expect(composeTrigger).toBeVisible({ timeout: 30_000 });
   await composeTrigger.click();
-  await page.getByPlaceholder("いまどうしてる？").fill(postBody);
+  await expect(composeBody).toBeVisible({ timeout: 30_000 });
+  await composeBody.fill(postBody);
   await page.getByRole("button", { name: "投稿", exact: true }).click();
 
   await expect(page.getByText(postBody, { exact: true })).toBeVisible({
