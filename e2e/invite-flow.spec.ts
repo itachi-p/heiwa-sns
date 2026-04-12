@@ -6,6 +6,10 @@ loadEnvLocal();
 /**
  * 先行体験「3番」相当: **貸与済みのメール＋パスワードでログイン** →（必要なら招待コード・初回パス変更・ニックネーム）→ トップで初投稿。
  *
+ * **本体の前提（ここが満たされないと DB も変わらずモーダルも出ない）**
+ * - **招待トークン**（`invite_tokens.is_used`）は **`POST /api/invite-bind` か `POST /api/invite-signup` が成功したときだけ**消費される。`InviteOnboardingLayer` は **`users.invite_onboarding_completed === false`** のときだけ出る（`components/invite-onboarding-layer.tsx`）。マイグレで既存ユーザは一括 `true` 済みのため、貸与ダミーがそのままなら招待モーダルは出ず、トークンも触られない。
+ * - **ニックネーム強制**は **`users.nickname` が null / 空 / 空白のみ**のときの `NicknameRequiredModal` のみ（`needsNickname` in `app/(main)/page.tsx`）。**既にニックネームがあるユーザを「変更させる」専用ゲートは無い**（運用で `nickname` を空にする等が必要）。
+ *
  * 必須:
  *   E2E_LOGIN_EMAIL / E2E_LOGIN_PASSWORD … 事前に用意したテストユーザ（例: user02@test.com）
  *
