@@ -5,7 +5,9 @@ import { createClient } from "@supabase/supabase-js";
  *
  * 必要な環境変数: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
  * `E2E_LOGIN_EMAIL`, `E2E_LOGIN_PASSWORD`（Auth パスワードをこの値に戻す）。
- * 任意: `INVITE_CODE` … 消費済みなら未使用に戻す（同一トークンで次回を回す用）。
+ * 任意: `INVITE_CODE` … 消費済みなら未使用に戻す（同一トークンで「初回」フローを繰り返す用）。
+ *
+ * **`nickname` は触らない**（E2E で設定した表示名はそのまま残す。手動で戻す運用は不要）。
  *
  * 無効化: `E2E_LENT_TEARDOWN=0`
  */
@@ -57,7 +59,6 @@ export async function resetLentInviteUserAfterE2e(): Promise<void> {
     .update({
       invite_onboarding_completed: false,
       must_change_password: true,
-      nickname: null,
       nickname_locked: false,
       invite_label: null,
     })

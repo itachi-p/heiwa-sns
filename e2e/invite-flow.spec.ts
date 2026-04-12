@@ -21,7 +21,7 @@ test.afterEach(async () => {
  * 任意:
  *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）。**有効なら** bind 成功後に続行。**無効・消費済みなら**モーダル内 `role=alert` に「招待コードが無効」系の表示で **その時点でテスト成功終了**（ニックネーム・投稿はスキップ）。teardown で **同一トークン行を未使用に戻す**（次回も同じコードで可）。
  *   E2E_FIRST_LOGIN_NEW_PASSWORD … `must_change_password` のとき初回変更に使う（8文字以上・英字+数字）
- *   `SUPABASE_SERVICE_ROLE_KEY` … **各テストの後**に貸与状態へ戻す teardown 用（`filtering.spec.ts` と同様。無い場合は teardown をスキップ）。
+ *   `SUPABASE_SERVICE_ROLE_KEY` … **各テストの後**に貸与状態へ戻す teardown 用（`filtering.spec.ts` と同様。無い場合は teardown をスキップ）。**`nickname` は戻さない**（`reset-lent-invite-user.ts`）。
  *   `E2E_LENT_TEARDOWN=0` … 貸与状態への自動復帰を無効化（デバッグ用。既定はオン扱い）。
  *
  * `.env.local` に上記キーを書いてもよい（`e2e/load-env-local.ts` が未設定のキーのみ注入。シェルで既に export している値は上書きしない）。
