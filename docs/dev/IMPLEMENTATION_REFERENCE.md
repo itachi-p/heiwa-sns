@@ -96,6 +96,7 @@ virtualSortMs = created_ms
 |------|----------------|
 | ログイン UI（Google ＋ メール／パスワード） | `components/site-header.tsx` |
 | タイムライン取得・フィルタ・呼び出し | `app/(main)/page.tsx`（`fetchPosts`） |
+| マイホーム（自分の投稿・プロフ） | `app/(main)/home/page.tsx`（`fetchOwnPosts`）。**セッションの `user.id` が変わった直後**は前ユーザの state を即クリアし、非同期取得完了時は **現在のセッション id と要求 id が一致するときだけ** `setPosts` 等を適用（遅延応答で他ユーザのデータが上書きしない） |
 | 並び純関数 | `lib/timeline-sort.ts` |
 | 毒性閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | 匿名時の閾値 | `lib/timeline-threshold.ts` |

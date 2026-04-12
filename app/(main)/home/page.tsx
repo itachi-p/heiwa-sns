@@ -252,6 +252,9 @@ export default function HomePage() {
   replyScoresByIdRef.current = replyScoresById;
 
   const userId = user?.id ?? null;
+  /** `fetchOwnPosts(uid)` 完了時に、すでに別ユーザへ切り替わっていれば state を汚さない */
+  const homeSessionUserIdRef = useRef<string | null>(null);
+  homeSessionUserIdRef.current = userId;
   const needsPasswordChange =
     Boolean(userId) && profileReady && mustChangePassword;
   const needsInviteOnboarding =
@@ -362,6 +365,7 @@ export default function HomePage() {
   }
 
   const fetchOwnPosts = async (uid: string) => {
+    const stillThisViewer = () => homeSessionUserIdRef.current === uid;
     try {
       await fetch("/api/finalize-my-pending", {
         method: "POST",
@@ -377,7 +381,7 @@ export default function HomePage() {
       .order("created_at", { ascending: false });
 
     if (error) {
-      setErrorMessage(error.message);
+      if (stillThisViewer()) setErrorMessage(error.message);
       return;
     }
 
@@ -412,7 +416,7 @@ export default function HomePage() {
         .eq("id", uid)
         .maybeSingle();
       if (fallback.error) {
-        setErrorMessage(fallback.error.message);
+        if (stillThisViewer()) setErrorMessage(fallback.error.message);
         return;
       }
       profile = fallback.data as ProfileRow | null;
@@ -466,6 +470,9 @@ export default function HomePage() {
     const avatarUrl = profile?.avatar_url ?? null;
     const placeholderHex = profile?.avatar_placeholder_hex ?? null;
     const bio = profile?.bio ?? "";
+    if (!stillThisViewer()) {
+      return;
+    }
     const merged = ((rows ?? []) as Post[]).map((p) => ({
       ...p,
       users: {
@@ -487,7 +494,7 @@ export default function HomePage() {
         .order("created_at", { ascending: true });
 
       if (replyErr) {
-        setErrorMessage(replyErr.message);
+        if (stillThisViewer()) setErrorMessage(replyErr.message);
         return;
       }
 
@@ -517,7 +524,7 @@ export default function HomePage() {
           .select("id, nickname, avatar_url, avatar_placeholder_hex")
           .in("id", replyAuthorIds);
         if (rpe) {
-          setErrorMessage(rpe.message);
+          if (stillThisViewer()) setErrorMessage(rpe.message);
           return;
         }
         for (const row of rprofiles ?? []) {
@@ -880,6 +887,10 @@ export default function HomePage() {
     if (!userId || !user) {
       setProfileReady(false);
       setProfileNickname(null);
+      setProfileAvatarUrl(null);
+      setProfileBio("");
+      setBioDraft("");
+      setNicknameDraft("");
       setMustChangePassword(false);
       setInviteLabel(null);
       setInviteOnboardingCompleted(true);
@@ -894,16 +905,43 @@ export default function HomePage() {
       setEditingPostId(null);
       setReplyParentReplyId(null);
       setEditingReplyId(null);
+      setPostScoresById({});
+      setReplyScoresById({});
+      setErrorMessage(null);
       setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
       setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
       return;
     }
 
     setProfileReady(false);
+    setPosts([]);
+    setRepliesByPost({});
+    setReplyDrafts({});
+    setReplyComposerPostId(null);
+    setEditingPostId(null);
+    setReplyParentReplyId(null);
+    setEditingReplyId(null);
+    setProfileNickname(null);
+    setProfileAvatarUrl(null);
+    setProfilePlaceholderHex(null);
+    setProfileBio("");
+    setBioDraft("");
+    setNicknameDraft("");
+    setMustChangePassword(false);
+    setInviteLabel(null);
+    setInviteOnboardingCompleted(true);
+    setNicknameLocked(false);
+    setProfileExternalUrl("");
+    setExternalUrlDraft("");
+    setErrorMessage(null);
+    setPostScoresById({});
+    setReplyScoresById({});
     void (async () => {
       await ensurePublicUserRow(user);
       await fetchOwnPosts(userId);
-      setProfileReady(true);
+      if (homeSessionUserIdRef.current === userId) {
+        setProfileReady(true);
+      }
     })();
   }, [userId, user]);
 
