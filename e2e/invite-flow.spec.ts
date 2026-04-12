@@ -19,7 +19,7 @@ test.afterEach(async () => {
  *   E2E_LOGIN_EMAIL / E2E_LOGIN_PASSWORD … 事前に用意したテストユーザ（例: user02@test.com）
  *
  * 任意:
- *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）。teardown で **同一トークン行を未使用に戻す**（次回も同じコードで可）。
+ *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）。**有効なら** bind 成功後に続行。**無効・消費済みなら**モーダル内 `role=alert` に「招待コードが無効」系の表示で **その時点でテスト成功終了**（ニックネーム・投稿はスキップ）。teardown で **同一トークン行を未使用に戻す**（次回も同じコードで可）。
  *   E2E_FIRST_LOGIN_NEW_PASSWORD … `must_change_password` のとき初回変更に使う（8文字以上・英字+数字）
  *   `SUPABASE_SERVICE_ROLE_KEY` … **各テストの後**に貸与状態へ戻す teardown 用（`filtering.spec.ts` と同様。無い場合は teardown をスキップ）。
  *   `E2E_LENT_TEARDOWN=0` … 貸与状態への自動復帰を無効化（デバッグ用。既定はオン扱い）。
@@ -120,9 +120,20 @@ test("lent user: login → optional gates → first post on timeline", async ({
       !code,
       "招待未完了のユーザです。未使用の INVITE_CODE を設定するか、SQL で invite_onboarding_completed を済ませてください。"
     );
-    await page.getByPlaceholder("招待コード").fill(code);
-    await page.getByRole("button", { name: "登録する" }).click();
-    await expect(inviteHeading).toBeHidden({ timeout: 45_000 });
+    const inviteDialog = page.getByRole("dialog", {
+      name: "招待コードを入力",
+    });
+    await inviteDialog.getByPlaceholder("招待コード").fill(code);
+    await inviteDialog.getByRole("button", { name: "登録する" }).click();
+
+    try {
+      await inviteHeading.waitFor({ state: "hidden", timeout: 45_000 });
+    } catch {
+      const alert = inviteDialog.getByRole("alert");
+      await expect(alert).toBeVisible({ timeout: 15_000 });
+      await expect(alert).toContainText("招待コードが無効");
+      return;
+    }
   }
 
   try {
