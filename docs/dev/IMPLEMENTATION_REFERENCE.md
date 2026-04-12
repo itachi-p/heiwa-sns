@@ -80,6 +80,7 @@ virtualSortMs = created_ms
 
 ## 5. 招待・初回パスワード変更（`users.must_change_password`）
 
+- **メール確認（先行体験・ダミーメアド）**: `signInWithPassword` で **「Email not confirmed」** になるのは、Supabase プロジェクトで **メール確認が必須**のとき、未確認ユーザでログインした場合。**先行体験ではダミーメアドで回すなら**、ダッシュボード **Authentication → Providers → Email** で **Confirm email をオフ**にするか、対象ユーザを **Confirm user** する（本番方針に合わせて切り替え）。**`/api/invite-signup`** が `auth.admin.createUser` する経路は **`email_confirm: false`** で作るため、この API 経由の新規のみ確認メールに依存しない。
 - **DB**: `users.is_invite_user` / `users.must_change_password` / `users.invite_label`（`docs/schema.md`・マイグレーション参照）。既存行はデフォルトでゲートに掛からない。
 - **招待メール新規登録**（`/api/invite-signup`）: トークン消費後に `is_invite_user=true`・`must_change_password=false`・`invite_label` を付与（`lib/invite-label.ts` の採番。一意衝突時は再試行）。
 - **ニックネーム未設定**（`needsNickname`）: `users.nickname` が **null・空・空白のみ**のとき `NicknameRequiredModal` を出す（`app/(main)/page.tsx` / `app/(main)/home/page.tsx`）。
