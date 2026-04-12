@@ -1,5 +1,7 @@
 # ドキュメント索引（Nagi SNS）
 
+**ルートの [`README.md`](../README.md)（リポジトリ概要）とは別ファイル**です。開発用の文書マップはここだけを正とします。
+
 **しばしば書き換えない前提**の設計・仕様メモを、読者と粒度で分けています。
 **実装の真実は常にコード**（と `supabase/migrations/`）。文章は追従が遅れることがあるため、差分が出たら **コード側を正**として本ディレクトリを更新してください。
 
@@ -25,12 +27,13 @@
 | **最優先** | **明示依頼がない限りコードを変えない**・未確定案を実装に落とさない境界 | [`CONSTITUTION.md`](CONSTITUTION.md) |
 | **高** | プロダクト不変条件・判断基準 | [`PRODUCT_PRINCIPLES.md`](PRODUCT_PRINCIPLES.md)、[`DECISIONS.md`](DECISIONS.md) |
 | **高** | タイムライン・毒性フィルタ・スキの**実装に即した**要約 | [`dev/IMPLEMENTATION_REFERENCE.md`](dev/IMPLEMENTATION_REFERENCE.md) |
-| **中** | **実装予定・消化済み・備忘**（アルゴリズム定義は書かない） | [`dev/IMPLEMENTATION_BACKLOG.md`](dev/IMPLEMENTATION_BACKLOG.md) |
+| **中** | **実装予定・消化済み・備忘**（アルゴリズム定義は書かない）。**再開時は最初にここ** | [`dev/IMPLEMENTATION_BACKLOG.md`](dev/IMPLEMENTATION_BACKLOG.md) |
 | **高** | DB・マイグレーション禁止の境界 | リポジトリ `.cursor/rules/database-and-migrations.mdc` |
-| **中** | E2E（Playwright）と手動検証 | [`PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`](PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md) |
+| **中** | E2E（Playwright）と手動検証 | [`PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`](PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md)、[`e2e/PLAYWRIGHT-INDEX.md`](../e2e/PLAYWRIGHT-INDEX.md)（スペック一覧） |
 | **中** | スキーマ意図（真実は migrations） | [`schema.md`](schema.md) |
 | **中** | 前提・見送り案 | [`ASSUMPTIONS_AND_REJECTED_IDEAS.md`](ASSUMPTIONS_AND_REJECTED_IDEAS.md) |
 | **運用** | 公開・パイロット準備 | [`LAUNCH_PLAN.md`](LAUNCH_PLAN.md) |
+| **運用** | テストユーザ 01〜の役割（手動 / E2E / 招待貸与） | [`dev/TEST_USER_ROLES.md`](dev/TEST_USER_ROLES.md) |
 
 ---
 
@@ -39,3 +42,4 @@
 - **憲法・ドキュメント階層**: [`CONSTITUTION.md`](CONSTITUTION.md)、`.cursor/rules/documentation-and-principles.mdc`（`alwaysApply`）
 - **DB 変更の禁止境界**: `.cursor/rules/database-and-migrations.mdc`
 - **再発時の運用**: `.cursor/rules/agent-workflow.mdc`
+- **テストユーザ番号**: `.cursor/rules/test-user-roles.mdc`（`docs/dev/TEST_USER_ROLES.md` への誘導）

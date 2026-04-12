@@ -17,24 +17,23 @@ function maxOfScores(scores: Record<string, number>): number {
   return m;
 }
 
-/** テスト用: 5指標を1行に並べ、右端に max（同一行の数値から算出） */
+/** テスト用: 5指標の直後にスペースを空けて max（同一行の数値から算出）。狭い幅ではブロック全体が折り返すのみ */
 export function ModerationCompactRow({
   scores,
 }: {
   scores: Record<string, number>;
 }) {
+  const maxVal = maxOfScores(scores);
   return (
-    <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-[11px] leading-snug text-gray-600">
-      <span className="min-w-0 flex flex-wrap gap-x-2 gap-y-0.5">
-        {KEYS.map((k) => (
-          <span key={k}>
-            {PERSPECTIVE_ATTRIBUTE_LABEL_JA[k] ?? k}{" "}
-            {typeof scores[k] === "number" ? scores[k]!.toFixed(3) : "—"}
-          </span>
-        ))}
-      </span>
-      <span className="shrink-0 tabular-nums text-gray-700">
-        max {maxOfScores(scores).toFixed(3)}
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-snug text-gray-600">
+      {KEYS.map((k) => (
+        <span key={k} className="shrink-0">
+          {PERSPECTIVE_ATTRIBUTE_LABEL_JA[k] ?? k}{" "}
+          {typeof scores[k] === "number" ? scores[k]!.toFixed(3) : "—"}
+        </span>
+      ))}
+      <span className="ml-0.5 shrink-0 border-l border-gray-200 pl-2 tabular-nums text-gray-700">
+        max {maxVal.toFixed(3)}
       </span>
     </div>
   );

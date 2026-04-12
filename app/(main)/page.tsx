@@ -24,6 +24,7 @@ import {
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
+import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
@@ -1408,27 +1409,23 @@ export default function Home() {
     if (!userId) {
       const msg = "ログインしてください。";
       setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
       return;
     }
     if (needsNickname || needsPasswordChange || needsInviteOnboarding)
       return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) {
-      setComposeFormError(null);
-      setToast({ message: "投稿内容を入力してください。", tone: "error" });
+      setComposeFormError("投稿内容を入力してください。");
       return;
     }
     if (!textContent && composePostImage) {
       const msg = "画像を添付する場合は本文を入力してください。";
       setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
       return;
     }
     if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
       const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
       setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
       return;
     }
 
@@ -1465,7 +1462,6 @@ export default function Home() {
         if (!res.ok) {
           const msg = json?.error ?? "AI判定に失敗しました。";
           setComposeFormError(msg);
-          setToast({ message: msg, tone: "error" });
           setPostSubmitting(false);
           return;
         }
@@ -1490,17 +1486,34 @@ export default function Home() {
         console.error("moderation error:", err);
         const msg = "AI判定に失敗しました。";
         setComposeFormError(msg);
-        setToast({ message: msg, tone: "error" });
         setPostSubmitting(false);
         return;
       }
+    }
+
+    const { data: sessionWrap, error: sessionReadErr } =
+      await supabase.auth.getSession();
+    if (sessionReadErr) {
+      console.error("getSession error:", sessionReadErr);
+    }
+    const sessionUser = sessionWrap.session?.user;
+    if (!sessionUser?.id) {
+      setComposeFormError(
+        "ログインの有効期限が切れている可能性があります。ログインし直してからお試しください。"
+      );
+      setPostSubmitting(false);
+      return;
+    }
+    const authorId = sessionUser.id;
+    if (authorId !== userId) {
+      setUser(sessionUser);
     }
 
     const { data, error } = await supabase
       .from("posts")
       .insert({
         content: textContent,
-        user_id: userId,
+        user_id: authorId,
         moderation_max_score: postOverallMax,
         moderation_dev_scores:
           Object.keys(postScores).length > 0
@@ -1512,9 +1525,7 @@ export default function Home() {
 
     if (error) {
       console.error("insert error:", error);
-      const msg = error.message;
-      setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
+      setComposeFormError(friendlyClientDbMessage(error.message));
       setPostSubmitting(false);
       return;
     }
@@ -1527,14 +1538,13 @@ export default function Home() {
     if (composePostImage) {
       const up = await uploadPostImage(
         supabase,
-        userId,
+        authorId,
         data.id,
         composePostImage
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
         setComposeFormError(up.message);
-        setToast({ message: up.message, tone: "error" });
         setPostSubmitting(false);
         return;
       }
@@ -1542,13 +1552,12 @@ export default function Home() {
         .from("posts")
         .update({ image_storage_path: up.path })
         .eq("id", data.id)
-        .eq("user_id", userId);
+        .eq("user_id", authorId);
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", data.id);
-        const msg = updErr.message;
+        const msg = friendlyClientDbMessage(updErr.message);
         setComposeFormError(msg);
-        setToast({ message: msg, tone: "error" });
         setPostSubmitting(false);
         return;
       }
@@ -1776,7 +1785,7 @@ export default function Home() {
                       disabled={postSubmitting}
                       autoComplete="off"
                       enterKeyHint="send"
-                      className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
+                      className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
                     />
                     <ImageAttachIconButton
                       disabled={postSubmitting}
@@ -1785,7 +1794,6 @@ export default function Home() {
                           const r = await preparePostImageForUpload(file);
                           if (!r.ok) {
                             setComposeFormError(r.message);
-                            setToast({ message: r.message, tone: "error" });
                             return;
                           }
                           setComposeFormError(null);

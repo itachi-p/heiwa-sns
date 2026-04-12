@@ -12,6 +12,28 @@ Use newest-first entries.
 
 ---
 
+## 2026-04-15
+
+### テストユーザ番号の役割分担（先行体験）
+
+- **Status:** accepted
+- **Context:** 手動検証・E2E・招待貸与で同じ番号を混同すると運用と DB が壊れやすい。
+- **Decision:** **01・02 は手動用**（E2E が 2 人目・3 人目を要するときだけ 02・01 を E2E に使う）。**03 は E2E 専用**（手動ログインしない。teardown で引っかかる状態を初期寄せ、ニックネーム等は据え置き可）。**04 以降は招待貸与スタンバイ**（手動・E2E に使わず、初期形を揃え貸与前は触らない）。
+- **Consequences:** 運用の正は **`docs/dev/TEST_USER_ROLES.md`**。Agent 向けに **`.cursor/rules/test-user-roles.mdc`** で参照と方針確認を要求。
+
+---
+
+## 2026-04-14
+
+### 先行体験でメール本人確認を切り、ダミーメアドを許可
+
+- **Status:** accepted
+- **Context:** 受信可能なメール必須だとテスト・撮影の運用が重い。
+- **Decision:** **対象の Supabase プロジェクト**では Dashboard の **Email プロバイダで「Confirm email」をオフ**にし、**ダミーメールでもサインアップ・ログイン可能**にする。本番向け一般公開では **原則オン（本人確認あり）**を推奨。
+- **Consequences:** スパム登録・なりすまし耐性は下がる。既存の未確認ユーザは設定変更後も残る場合があるため、**手動で Confirm** または **再登録**が必要になることがある。手順は `docs/dev/IMPLEMENTATION_REFERENCE.md` セクション 5。
+
+---
+
 ## 2026-04-13
 
 ### 先行テスト前の新規登録経路を Google 中心に制限
@@ -57,7 +79,7 @@ Use newest-first entries.
 
 - **Status:** accepted
 - **Context:** 下書きと実装の乖離、README と複数 md の役割重複、Cursor が参照すべき「正」の分散。
-- **Decision:** `docs/README.md` を索引とする。招待向けは `INVITE_AT_A_GLANCE.md` / `INVITE_OVERVIEW.md` / `INVITE_DEEP_DIVE.md`。アルゴリズム・閾値の要約は `docs/dev/IMPLEMENTATION_REFERENCE.md` に集約。`RATIONALE_PUBLIC.md` はリダイレクト用スタブ。Cursor に `.cursor/rules/documentation-and-principles.mdc`（`alwaysApply: true`）を追加。
+- **Decision:** **`docs/INDEX.md`** をドキュメント索引とする（ルート `README.md` との混同を避けるため README ではない名前にしている）。招待向けは `INVITE_AT_A_GLANCE.md` / `INVITE_OVERVIEW.md` / `INVITE_DEEP_DIVE.md`。アルゴリズム・閾値の要約は `docs/dev/IMPLEMENTATION_REFERENCE.md` に集約。`RATIONALE_PUBLIC.md` はリダイレクト用スタブ。Cursor に `.cursor/rules/documentation-and-principles.mdc`（`alwaysApply: true`）を追加。
 - **Consequences:** タイムライン・毒性・スキの挙動を変えたら `IMPLEMENTATION_REFERENCE.md` を同じ変更で更新する。手動検証に影響があれば `PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md` も更新。
 
 ---

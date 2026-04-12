@@ -20,7 +20,7 @@
 
 | 役割 | 場所 |
 |------|------|
-| 索引 | `docs/README.md` |
+| 索引 | `docs/INDEX.md` |
 | 実装の要約（数式・パス） | `docs/dev/IMPLEMENTATION_REFERENCE.md` |
 | 採用済み決定ログ | `docs/DECISIONS.md` |
 | Cursor ルール（本ファイルと重なる部分） | `.cursor/rules/documentation-and-principles.mdc`, `agent-workflow.mdc`, `database-and-migrations.mdc` |

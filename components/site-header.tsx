@@ -227,52 +227,49 @@ export function SiteHeader({
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-gray-200/90 bg-white/95 backdrop-blur">
-        <div className="mx-auto w-full max-w-xl px-4 py-2 sm:max-w-3xl lg:max-w-6xl">
-          <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate text-lg font-semibold sm:text-xl">
-                Nagi-SNS
-              </h1>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
-              {!authReady ? (
-                <span className="text-gray-500">読み込み中…</span>
-              ) : userId ? (
-                <>
-                  <span className="flex max-w-[140px] items-center gap-2 sm:max-w-[220px]">
-                    <UserAvatar
-                      name={profileNickname}
-                      avatarUrl={profileAvatarUrl}
-                      placeholderHex={avatarPlaceholderHex}
-                      size="sm"
-                    />
-                    <span
-                      className="truncate text-gray-600"
-                      title={profileNickname ?? ""}
-                    >
-                      {profileNickname?.trim()
-                        ? profileNickname
-                        : "未設定"}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void onSignOut()}
-                    className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 sm:text-sm"
+        <div className="mx-auto w-full max-w-xl px-3 py-2 sm:max-w-3xl sm:px-4 lg:max-w-6xl">
+          <div className="flex w-full min-w-0 items-center gap-2">
+            <h1 className="shrink-0 text-base font-semibold tracking-tight text-gray-900 sm:text-lg">
+              Nagi
+            </h1>
+            <div className="min-w-0 flex-1" aria-hidden="true" />
+            {!authReady ? (
+              <span className="shrink-0 text-xs text-gray-500 sm:text-sm">
+                読み込み中…
+              </span>
+            ) : userId ? (
+              <>
+                <div className="flex min-w-0 shrink items-center gap-1.5 text-sm">
+                  <UserAvatar
+                    name={profileNickname}
+                    avatarUrl={profileAvatarUrl}
+                    placeholderHex={avatarPlaceholderHex}
+                    size="xs"
+                  />
+                  <span
+                    className="min-w-0 truncate text-left text-xs text-gray-600 sm:text-sm"
+                    title={profileNickname?.trim() ? profileNickname : "未設定"}
                   >
-                    ログアウト
-                  </button>
-                </>
-              ) : (
+                    {profileNickname?.trim() ? profileNickname : "未設定"}
+                  </span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setLoginModalOpen(true)}
-                  className="rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 sm:px-3 sm:text-sm"
+                  onClick={() => void onSignOut()}
+                  className="shrink-0 whitespace-nowrap rounded border border-gray-300 bg-white px-1.5 py-1 text-[11px] hover:bg-gray-50 sm:px-2 sm:text-sm"
                 >
-                  ログイン・新規登録
+                  ログアウト
                 </button>
-              )}
-            </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLoginModalOpen(true)}
+                className="shrink-0 rounded border border-gray-300 bg-white px-2 py-1 text-xs hover:bg-gray-50 sm:px-3 sm:text-sm"
+              >
+                ログイン・新規登録
+              </button>
+            )}
           </div>
           <p className="mt-1 text-xs leading-snug text-gray-600 sm:text-sm">
             「数」に追われる荒波から、穏やかな支流へ

@@ -55,7 +55,8 @@ export async function POST(req: Request) {
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
-    email_confirm: false,
+    /** `true` = メール確認済み扱い。`false` だと未確認のまま作られ、直後の `signInWithPassword` が Email not confirmed になる */
+    email_confirm: true,
   });
   if (createErr || !created.user?.id) {
     return badRequest(createErr?.message ?? "新規登録に失敗しました。");

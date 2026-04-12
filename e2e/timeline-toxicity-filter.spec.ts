@@ -41,6 +41,13 @@ const TIERS = [
   },
 ] as const;
 
+const LEVEL_RANGE: Record<FilterLevel, string> = {
+  strict: "0",
+  soft: "1",
+  normal: "2",
+  off: "3",
+};
+
 async function loginEmailPassword(
   page: Page,
   email: string,
@@ -63,54 +70,39 @@ async function logout(page: Page): Promise<void> {
   ).toBeVisible({ timeout: 15_000 });
 }
 
-function toxicityFilterSelect(page: Page) {
-  const form = page
-    .locator("form")
-    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) });
-  return form.locator("select").first();
-}
-
-function overThresholdBehaviorSelect(page: Page) {
-  const form = page
-    .locator("form")
-    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) });
-  return form.locator("select").nth(1);
-}
-
-async function openProfileEdit(page: Page) {
-  await page.goto("/home");
-  await expect(
-    page.getByRole("heading", { name: "あなたの投稿（新しい順）" })
-  ).toBeVisible({ timeout: 60_000 });
-  await page.getByRole("button", { name: "プロフィールを編集" }).click();
-  await expect(
-    page.getByRole("heading", { name: "プロフィール編集" })
-  ).toBeVisible();
-}
-
-async function saveProfileAndClose(page: Page): Promise<void> {
-  const form = page
-    .locator("form")
-    .filter({ has: page.getByRole("heading", { name: "プロフィール編集" }) });
-  await form.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "プロフィール編集" })
-  ).not.toBeVisible({ timeout: 30_000 });
+async function openToxicitySettingsModal(page: Page): Promise<void> {
+  await page.goto("/");
+  await expect(page.locator("main")).toBeVisible({ timeout: 60_000 });
+  await page
+    .getByRole("navigation", { name: "メイン" })
+    .getByRole("button", { name: "可視性" })
+    .click();
+  await expect(page.getByRole("dialog", { name: "閲覧フィルタ" })).toBeVisible();
 }
 
 async function setToxicityFilter(page: Page, level: FilterLevel): Promise<void> {
-  await openProfileEdit(page);
-  await toxicityFilterSelect(page).selectOption(level);
-  await saveProfileAndClose(page);
+  await openToxicitySettingsModal(page);
+  const dialog = page.getByRole("dialog", { name: "閲覧フィルタ" });
+  await dialog.locator('input[type="range"]').fill(LEVEL_RANGE[level]);
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 }
 
 async function setOverThresholdBehavior(
   page: Page,
   behavior: OverThresholdBehavior
 ): Promise<void> {
-  await openProfileEdit(page);
-  await overThresholdBehaviorSelect(page).selectOption(behavior);
-  await saveProfileAndClose(page);
+  await openToxicitySettingsModal(page);
+  const dialog = page.getByRole("dialog", { name: "閲覧フィルタ" });
+  const sw = dialog.getByRole("switch");
+  const wantFold = behavior === "fold";
+  for (let i = 0; i < 3; i++) {
+    const checked = (await sw.getAttribute("aria-checked")) === "true";
+    if (checked === wantFold) break;
+    await sw.click();
+  }
+  await dialog.getByRole("button", { name: "保存" }).click();
+  await expect(dialog).not.toBeVisible({ timeout: 30_000 });
 }
 
 async function postWithMarkerVisible(page: Page, marker: string): Promise<boolean> {
@@ -151,7 +143,7 @@ function expectHiddenAtLevel(
 
 test.describe.configure({ mode: "serial" });
 
-test.describe("閲覧フィルタ強度とタイムライン表示", () => {
+test.describe("タイムライン閲覧フィルタ（帯・折りたたみ）", () => {
   test.skip(
     !u1 || !p1 || !u2 || !p2,
     "TEST_USER1_EMAIL / TEST_USER1_PASSWORD / TEST_USER2_EMAIL / TEST_USER2_PASSWORD を .env.local に設定してください。"
@@ -176,9 +168,7 @@ test.describe("閲覧フィルタ強度とタイムライン表示", () => {
       await loginEmailPassword(page, u1!, p1!);
 
       const composeInput = page.getByPlaceholder("いまどうしてる？");
-      const openCompose = page.getByRole("button", {
-        name: "投稿フォームを開く",
-      });
+      const openCompose = page.getByRole("button", { name: "投稿を書く" });
 
       for (const tier of TIERS) {
         const marker = `E2E-FILTER-${runId}-${tier.key}`;
@@ -242,7 +232,6 @@ test.describe("閲覧フィルタ強度とタイムライン表示", () => {
         await page.goto("/");
         await expect(page.locator("main")).toBeVisible();
 
-        // strict では S765 は閾値超なので、本文マーカーは最初は見えない。
         const severeMarker = markers[3]!;
         await expect
           .poll(async () => postWithMarkerVisible(page, severeMarker), {
@@ -251,9 +240,10 @@ test.describe("閲覧フィルタ強度とタイムライン表示", () => {
           })
           .toBe(false);
 
-        const foldCard = page.getByText("この投稿は表示が制限されています");
-        await expect(foldCard.first()).toBeVisible({ timeout: 30_000 });
-        await page.getByRole("button", { name: "タップして表示" }).first().click();
+        await page
+          .getByRole("button", { name: "表示制限中（タップで展開）" })
+          .first()
+          .click();
 
         await expect
           .poll(async () => postWithMarkerVisible(page, severeMarker), {

@@ -13,7 +13,8 @@ type UserAvatarProps = {
   avatarUrl?: string | null;
   /** 画像が無いときの丸背景色（#RRGGBB）。未設定時はスレート系 */
   placeholderHex?: string | null;
-  size?: "sm" | "lg";
+  /** `xs`: ヘッダー等の狭い行（`sm` より一段小さい） */
+  size?: "xs" | "sm" | "lg";
 };
 
 export function UserAvatar({
@@ -25,7 +26,9 @@ export function UserAvatar({
   const dim =
     size === "lg"
       ? "h-24 w-24 text-2xl"
-      : "h-8 w-8 text-xs";
+      : size === "xs"
+        ? "h-7 w-7 text-[10px]"
+        : "h-8 w-8 text-xs";
   if (avatarUrl) {
     return (
       // 外部 Storage URL のため next/image のドメイン設定より img を使用

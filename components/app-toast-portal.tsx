@@ -25,7 +25,8 @@ export function AppToastPortal({ message, tone }: Props) {
   const node = (
     <div
       className={[
-        "pointer-events-none fixed left-1/2 z-[2147483000] max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-center text-sm text-white shadow-lg",
+        "pointer-events-none fixed left-1/2 z-[2147483000] w-max max-w-[min(92vw,28rem)] -translate-x-1/2 rounded-lg border px-4 py-2.5 text-left text-sm text-white shadow-lg",
+        "whitespace-pre-line [overflow-wrap:anywhere]",
         "bottom-[calc(5.75rem+env(safe-area-inset-bottom,0px))] sm:bottom-[calc(5.5rem+env(safe-area-inset-bottom,0px))]",
         tone === "error"
           ? "border-red-400/80 bg-red-900"
@@ -34,7 +35,7 @@ export function AppToastPortal({ message, tone }: Props) {
       role="status"
       aria-live="polite"
     >
-      {message}
+      {message.trim()}
     </div>
   );
 

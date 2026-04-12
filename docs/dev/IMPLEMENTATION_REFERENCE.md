@@ -41,7 +41,7 @@ virtualSortMs = created_ms
 
 定数: `TIMELINE_AFFINITY_MAX_BOOST_MS`, `TIMELINE_TOXICITY_MAX_PENALTY_MS`, `TIMELINE_OWN_POST_BOOST_MS`（`lib/timeline-sort.ts`）。
 
-**5 指標の開発用表示**: **正は DB** の `moderation_dev_scores`（`{ first, second }`）。一覧取得時に `mergeDevScoresById` で state に載せる。localStorage / IndexedDB はオフライン・別タブ用のキャッシュ。IDB 復元前は **空 state を IDB に書かない**（`scoresPersistenceEnabled`）。2 行目は編集窓経過後に `/api/persist-moderation-dev-scores`（service role）または pending 確定の `finalize-pending-edits-core` で保存。
+**5 指標の開発用表示**: **正は DB** の `moderation_dev_scores`（`{ first, second }`）。一覧取得時に `mergeDevScoresById` で state に載せる。localStorage / IndexedDB はオフライン・別タブ用のキャッシュ。IDB 復元前は **空 state を IDB に書かない**（`scoresPersistenceEnabled`）。2 行目は編集窓経過後に `/api/persist-moderation-dev-scores`（service role）または pending 確定の `finalize-pending-edits-core` で保存。画面表示は **`components/moderation-compact-row.tsx`**（5 指標の直後に区切り＋ max を同一フローに続け、狭い幅でも max だけが常に別行になるレイアウトを避ける）。
 
 ---
 
@@ -49,7 +49,9 @@ virtualSortMs = created_ms
 
 - 定数: `lib/compose-text-limits.ts` の `POST_AND_REPLY_MAX_CHARS`（300）・`PROFILE_BIO_MAX_CHARS`（150）。
 - タイムライン投稿・返信の新規・編集・返信モーダル・`ReplyThread` の編集欄で `maxLength` と送信前チェックに使用。自己紹介はマイホームのプロフィール編集で同様。
-- フローティング新規投稿（`/`・`/home`）: 本文なし投稿は `AppToastPortal`（`setToast`）で通知。フロート内 `composeFormError` と併用可。オープン時は `AutosizeTextarea` の ref で `focus({ preventScroll: true })`。空＋画像なしのときは投稿ボタンを `disabled`。
+- フローティング新規投稿（`/`・`/home`）: フロート**オープン中**のバリデーション・投稿失敗は **`composeFormError` のみ**（トーストと二重表示しない。入力欄と重ならない）。投稿成功後の注意など、フロートを閉じたあとの通知は `AppToastPortal`（`setToast`）のまま。`AppToastPortal` は **常に viewport 内・視界に入る固定位置**（種類ごとに座標を分けない方針。端末は `bottom` + safe-area 等で調整）。**`w-max` + `max-w`** で短文の無駄な折り返しを抑える。オープン時は `AutosizeTextarea` の ref で `focus({ preventScroll: true })`。本文入力は **`text-base`（16px 相当）** で iOS のフォーカス時ページズームを避ける。空＋画像なしのときは投稿ボタンを `disabled`。
+- **`posts` の INSERT RLS**（`posts_insert_authenticated`）: `with check (auth.uid() = user_id)` のみ。本文の内容・攻撃性スコアは RLS 条件に含めない。クライアントは **`getSession()` の `user.id` を `user_id` に使う**（画面 state と JWT のずれ対策）。`new row violates row-level security policy` は **`lib/client-db-error.ts` の `friendlyClientDbMessage`** で短い案内に変換。
+- **返信モーダル**（`components/reply-composer-modal.tsx`）: 本文は **`rows={3}` の `<textarea>`**（自動伸長なし）。入力は **`text-base`（16px 相当）** で iOS のフォーカス時ページズームを避ける。オープン中は **body を `position: fixed` + スクロール位置復帰** と **`html` の `overscroll-behavior: none`** で背後スクロールを抑止。シートは **`h-fit` + `max-h`**、プレビュー＋入力ブロックは **`max-h` で内部スクロール**（旧来の `flex-1` による縦いっぱい伸長は使わず、シートを viewport 縦いっぱいに無駄に広げない）。フォーカスは **`preventScroll: true`**（`autoFocus` は使わない）。
 
 ---
 
@@ -80,7 +82,8 @@ virtualSortMs = created_ms
 
 ## 5. 招待・初回パスワード変更（`users.must_change_password`）
 
-- **先行体験・メール**: **本人確認（受信メール）必須のまま**運用する（ダミーメアド不可の方針）。未確認の `signInWithPassword` は **「Email not confirmed」**。手早い検証は **既存アカウント貸与**（受信可能なメール＋パスでログイン、E2E 3 番相当）。**`/api/invite-signup`** は `auth.admin.createUser` で **`email_confirm: false`** のユーザを作る（API 経路の技術メモ。プロジェクトの「ログインに確認必須」との関係は運用で整理）。
+- **先行体験・メール（方針切替）**: **ダミーメアド可**にする場合は Supabase 側で **メール本人確認をオフ**にする（下記）。オフ時は **未確認でも** `signInWithPassword` でログインできる。**オン**のままだと未確認は **「Email not confirmed」**。**`/api/invite-signup`** は `auth.admin.createUser` で **`email_confirm: true`**（招待経路は信頼済みとみなし、**作成時点でメール確認済み**）にして、続けてクライアントの **`signInWithPassword` が `Email not confirmed` にならない**ようにする。`false` は「未確認で作成」であり、ダッシュボードの Confirm が OFF でもログインが弾かれることがある。
+- **Supabase（クラウド）で本人確認を止める（ダミーメアド）**: まず **Authentication → Sign In / Providers → Email**（`.../auth/providers?provider=Email`）。**Notifications の Email ではない**。ダッシュボードの版によって **「Confirm email」トグルがこのモーダルに無い**ことがある。無い場合は **[Management API](https://supabase.com/docs/reference/api/v1-updates-a-projects-auth-config)** で `GET /v1/projects/{ref}/config/auth` の現状を確認し、`PATCH` で **`mailer_autoconfirm`**（サインアップを確認済み扱いにしやすい）や **`mailer_allow_unverified_email_sign_ins`**（未確認でもサインイン可）を調整する（Personal Access Token・`auth:write` 等のスコープが必要）。**本番では推奨しない**。既存の「未確認」ユーザは **Authentication → Users** で **Confirm user**、または再登録。概念は [General configuration](https://supabase.com/docs/guides/auth/general-configuration) の **Confirm Email** と同じだが、**UI のラベルと API 名は一致しない**。
 - **DB**: `users.is_invite_user` / `users.must_change_password` / `users.invite_label`（`docs/schema.md`・マイグレーション参照）。既存行はデフォルトでゲートに掛からない。
 - **招待メール新規登録**（`/api/invite-signup`）: トークン消費後に `is_invite_user=true`・`must_change_password=false`・`invite_label` を付与（`lib/invite-label.ts` の採番。一意衝突時は再試行）。
 - **ニックネーム未設定**（`needsNickname`）: `users.nickname` が **null・空・空白のみ**のとき `NicknameRequiredModal` を出す（`app/(main)/page.tsx` / `app/(main)/home/page.tsx`）。

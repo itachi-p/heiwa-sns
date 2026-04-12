@@ -28,4 +28,4 @@
 
 - 思想と背景の中くらい: [INVITE_OVERVIEW.md](INVITE_OVERVIEW.md)
 - 意思決定・前提・検証手順まで: [INVITE_DEEP_DIVE.md](INVITE_DEEP_DIVE.md)
-- 全ドキュメント一覧: [README.md](README.md)
+- 全ドキュメント一覧: [INDEX.md](INDEX.md)

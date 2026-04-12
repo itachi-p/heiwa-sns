@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
-import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { UserAvatar } from "@/components/user-avatar";
 
 /** 返信ボタン用（Threads の吹き出しに近いアイコン） */
@@ -57,20 +56,48 @@ export function ReplyComposerModal({
   viewerAvatarUrl,
   viewerPlaceholderHex,
 }: ReplyComposerModalProps) {
+  const draftTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   useEffect(() => {
     if (!open || typeof document === "undefined") return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const html = document.documentElement;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyPosition = body.style.position;
+    const prevBodyTop = body.style.top;
+    const prevBodyWidth = body.style.width;
+    const prevHtmlOverscroll = html.style.overscrollBehavior;
+
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    html.style.overscrollBehavior = "none";
+
     return () => {
-      document.body.style.overflow = prev;
+      body.style.overflow = prevBodyOverflow;
+      body.style.position = prevBodyPosition;
+      body.style.top = prevBodyTop;
+      body.style.width = prevBodyWidth;
+      html.style.overscrollBehavior = prevHtmlOverscroll;
+      window.scrollTo(0, scrollY);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.requestAnimationFrame(() => {
+      draftTextareaRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(id);
   }, [open]);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[58] flex items-end justify-center bg-black/45 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[58] flex items-end justify-center overflow-hidden overscroll-none bg-black/45 p-0 touch-manipulation sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="reply-composer-title"
@@ -79,7 +106,7 @@ export function ReplyComposerModal({
       }}
     >
       <div
-        className="flex min-h-0 max-h-[min(92dvh,36rem)] w-full max-w-lg flex-col rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[85vh] sm:rounded-2xl"
+        className="flex h-fit max-h-[min(88dvh,34rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-gray-200 bg-white shadow-xl sm:max-h-[min(85vh,34rem)] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
@@ -102,7 +129,7 @@ export function ReplyComposerModal({
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+        <div className="max-h-[min(50dvh,17rem)] min-h-0 touch-pan-y overflow-y-auto overscroll-contain px-4 py-3 sm:max-h-[min(58vh,20rem)]">
           <div className="flex gap-3 border-b border-gray-100 pb-3">
             <UserAvatar
               name={targetNickname}
@@ -125,15 +152,15 @@ export function ReplyComposerModal({
               avatarUrl={viewerAvatarUrl}
               placeholderHex={viewerPlaceholderHex}
             />
-            <AutosizeTextarea
+            <textarea
+              ref={draftTextareaRef}
               value={draft}
               onChange={(e) => onDraftChange(e.target.value)}
-              maxRows={10}
+              rows={3}
               maxLength={POST_AND_REPLY_MAX_CHARS}
               disabled={submitting}
               placeholder="返信を入力…"
-              autoFocus
-              className="min-h-[5rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
+              className="min-h-0 min-w-0 flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
             />
           </div>
         </div>

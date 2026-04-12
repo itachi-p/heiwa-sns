@@ -48,4 +48,4 @@
 - `.cursor/rules/database-and-migrations.mdc` — マイグレーション・スキーマ
 - `.cursor/rules/agent-workflow.mdc` — 再発時の運用
 
-全索引: [README.md](README.md)。
+全索引: [INDEX.md](INDEX.md)。

@@ -25,7 +25,7 @@ alwaysApply: true
 
 ## 単一の参照先
 
-- **ドキュメント全体の索引**: `docs/README.md`
+- **ドキュメント全体の索引**: `docs/INDEX.md`
 - **人間可読のスキーマ概要**: リポジトリの `docs/schema.md`
 - **機械的な真実**: `supabase/migrations/`（適用順に累積）
 
