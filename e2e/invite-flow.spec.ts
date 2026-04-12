@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { loadEnvLocal } from "./load-env-local";
+
+loadEnvLocal();
 
 /**
  * 先行体験「3番」相当: **貸与済みのメール＋パスワードでログイン** →（必要なら招待コード・初回パス変更・ニックネーム）→ トップで初投稿。
@@ -10,7 +13,9 @@ import { test, expect } from "@playwright/test";
  *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）
  *   E2E_FIRST_LOGIN_NEW_PASSWORD … `must_change_password` のとき初回変更に使う（8文字以上・英字+数字）
  *
- * 例:
+ * `.env.local` に上記キーを書いてもよい（`e2e/load-env-local.ts` が未設定のキーのみ注入。シェルで既に export している値は上書きしない）。
+ *
+ * 例（シェルで上書きする場合）:
  *   E2E_LOGIN_EMAIL=user02@test.com E2E_LOGIN_PASSWORD=user02ps npm run test:e2e -- e2e/invite-flow.spec.ts
  */
 const loginEmail = (process.env.E2E_LOGIN_EMAIL ?? "").trim();
@@ -21,14 +26,26 @@ test.skip(
   "E2E_LOGIN_EMAIL と E2E_LOGIN_PASSWORD を設定してから実行してください（貸与アカウント）。"
 );
 
+/** 画面上で自然人名に見える例（末尾に短い連番を付けて `users_nickname_unique_ci` と衝突しにくくする） */
+const E2E_NICKNAME_BASES = [
+  "田中健",
+  "佐藤美咲",
+  "鈴木拓也",
+  "高橋結菜",
+  "伊藤大輔",
+  "渡辺凛",
+] as const;
+
 test("lent user: login → optional gates → first post on timeline", async ({
   page,
 }) => {
   test.setTimeout(120_000);
 
-  const random = Math.floor(Math.random() * 1_000_000);
-  const nickname = `e2eu${random}`;
-  const postBody = `E2E lent-user ${random}`;
+  const base =
+    E2E_NICKNAME_BASES[Math.floor(Date.now() / 1000) % E2E_NICKNAME_BASES.length];
+  const seq = String(Date.now() % 10_000).padStart(4, "0");
+  const nickname = `${base}${seq}`.slice(0, 20);
+  const postBody = `先行E2Eの確認です。${nickname}として投稿しています。`;
 
   const loginModalHeading = page.getByRole("heading", {
     name: "ログイン・新規登録",
