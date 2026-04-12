@@ -1,7 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { loadEnvLocal } from "./load-env-local";
+import { resetLentInviteUserAfterE2e } from "./reset-lent-invite-user";
 
 loadEnvLocal();
+
+test.afterEach(async () => {
+  await resetLentInviteUserAfterE2e();
+});
 
 /**
  * 先行体験「3番」相当: **貸与済みのメール＋パスワードでログイン** →（必要なら招待コード・初回パス変更・ニックネーム）→ トップで初投稿。
@@ -14,8 +19,10 @@ loadEnvLocal();
  *   E2E_LOGIN_EMAIL / E2E_LOGIN_PASSWORD … 事前に用意したテストユーザ（例: user02@test.com）
  *
  * 任意:
- *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）
+ *   INVITE_CODE … `invite_onboarding_completed` が未のユーザ向け（`InviteOnboardingLayer`）。teardown で **同一トークン行を未使用に戻す**（次回も同じコードで可）。
  *   E2E_FIRST_LOGIN_NEW_PASSWORD … `must_change_password` のとき初回変更に使う（8文字以上・英字+数字）
+ *   `SUPABASE_SERVICE_ROLE_KEY` … **各テストの後**に貸与状態へ戻す teardown 用（`filtering.spec.ts` と同様。無い場合は teardown をスキップ）。
+ *   `E2E_LENT_TEARDOWN=0` … 貸与状態への自動復帰を無効化（デバッグ用。既定はオン扱い）。
  *
  * `.env.local` に上記キーを書いてもよい（`e2e/load-env-local.ts` が未設定のキーのみ注入。シェルで既に export している値は上書きしない）。
  *
