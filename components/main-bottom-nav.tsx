@@ -45,13 +45,14 @@ function ActivityIcon({ active }: { active: boolean }) {
       aria-hidden
     >
       <path
-        d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+        d="M4 6.5a2.5 2.5 0 0 1 2.5-2.5h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H11l-3.5 3v-3H6.5A2.5 2.5 0 0 1 4 13.5v-7z"
         stroke="currentColor"
         strokeWidth="1.5"
+        strokeLinejoin="round"
         fill="none"
       />
       <path
-        d="M8.5 10.5h7M8.5 13.5h4"
+        d="M8 8.75h8M8 11.75h5"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
@@ -148,7 +149,7 @@ export function MainBottomNav({
         <Link
           href="/home/activity"
           className={navBtn}
-          title="反応・アクティビティ"
+          title="リプ・アクティビティ"
           aria-current={isActivity ? "page" : undefined}
         >
           <span className="relative inline-flex">
@@ -157,7 +158,7 @@ export function MainBottomNav({
               <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
             ) : null}
           </span>
-          <span className={isActivity ? "text-sky-700" : ""}>反応</span>
+          <span className={isActivity ? "text-sky-700" : ""}>リプ</span>
         </Link>
 
         <button
