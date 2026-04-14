@@ -86,7 +86,7 @@ virtualSortMs = created_ms
 - **Supabase（クラウド）で本人確認を止める（ダミーメアド）**: まず **Authentication → Sign In / Providers → Email**（`.../auth/providers?provider=Email`）。**Notifications の Email ではない**。ダッシュボードの版によって **「Confirm email」トグルがこのモーダルに無い**ことがある。無い場合は **[Management API](https://supabase.com/docs/reference/api/v1-updates-a-projects-auth-config)** で `GET /v1/projects/{ref}/config/auth` の現状を確認し、`PATCH` で **`mailer_autoconfirm`**（サインアップを確認済み扱いにしやすい）や **`mailer_allow_unverified_email_sign_ins`**（未確認でもサインイン可）を調整する（Personal Access Token・`auth:write` 等のスコープが必要）。**本番では推奨しない**。既存の「未確認」ユーザは **Authentication → Users** で **Confirm user**、または再登録。概念は [General configuration](https://supabase.com/docs/guides/auth/general-configuration) の **Confirm Email** と同じだが、**UI のラベルと API 名は一致しない**。
 - **DB**: `users.is_invite_user` / `users.must_change_password` / `users.invite_label`（`docs/schema.md`・マイグレーション参照）。既存行はデフォルトでゲートに掛からない。
 - **招待メール新規登録**（`/api/invite-signup`）: トークン消費後に `is_invite_user=true`・`must_change_password=false`・`invite_label` を付与（`lib/invite-label.ts` の採番。一意衝突時は再試行）。
-- **ニックネーム未設定**（`needsNickname`）: `users.nickname` が **null・空・空白のみ**のとき `NicknameRequiredModal` を出す（`app/(main)/page.tsx` / `app/(main)/home/page.tsx`）。
+- **公開ID未設定**（`PublicIdRequiredLayer`）: ログイン済み・招待オンボーディング完了・パスワード変更不要のとき、`users.public_id` が **null・空**ならブロッキングで入力（`components/public-id-required-layer.tsx`・`POST /api/set-public-id`）。プロフィールURLは `/@{public_id}`（middleware で `/p/{handle}` にリライト）。
 - **貸与アカウント**: 運用で `must_change_password=true`（および必要なら `invite_label`）を付与。初回ログイン後は **`MustChangePasswordModal`**（`components/must-change-password-modal.tsx`）でパスワード変更を必須にし、成功後に `must_change_password=false` を自分の行へ `update`（`supabase.auth.updateUser` と続けて実行）。
 - **強度**: `lib/invite-password.ts`（8 文字以上・英字＋数字）。
 - **表示**: トップ `app/page.tsx`・マイホーム `app/home/page.tsx`・`app/home/activity/page.tsx`・自分の `app/home/[userId]/page.tsx` で `must_change_password===true` の間はニックネーム設定より先に当該モーダルを出し、操作は `canInteract` 相当でブロック（または閲覧を抑止）。
@@ -99,7 +99,7 @@ virtualSortMs = created_ms
 |------|----------------|
 | ログイン UI（Google ＋ メール／パスワード） | `components/site-header.tsx` |
 | タイムライン取得・フィルタ・呼び出し | `app/(main)/page.tsx`（`fetchPosts`） |
-| マイホーム（自分の投稿・プロフ） | `app/(main)/home/page.tsx`（`fetchOwnPosts`）。**セッションの `user.id` が変わった直後**は前ユーザの state を即クリアし、非同期取得完了時は **現在のセッション id と要求 id が一致するときだけ** `setPosts` 等を適用（遅延応答で他ユーザのデータが上書きしない） |
+| マイホーム（自分の投稿・プロフ編集） | `app/(main)/home/page.tsx`（`fetchOwnPosts`）。公開プロフィール閲覧は `app/(main)/p/[handle]/page.tsx`・`/@handle`。旧 `/home/[uuid]` は `app/(main)/home/[userId]/page.tsx` で `/@` へリダイレクト。**セッションの `user.id` が変わった直後**は前ユーザの state を即クリアし、非同期取得完了時は **現在のセッション id と要求 id が一致するときだけ** `setPosts` 等を適用（遅延応答で他ユーザのデータが上書きしない） |
 | 並び純関数 | `lib/timeline-sort.ts` |
 | 毒性閾値・ノイズフロア | `lib/toxicity-filter-level.ts` |
 | 匿名時の閾値 | `lib/timeline-threshold.ts` |

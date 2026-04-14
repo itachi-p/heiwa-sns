@@ -9,14 +9,13 @@ import React, {
   type FormEvent,
 } from "react";
 import Link from "next/link";
-import type { PostgrestError, User } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { AppToastPortal } from "@/components/app-toast-portal";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
-import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import {
   ReplyComposerModal,
   ReplyBubbleIcon,
@@ -49,7 +48,6 @@ import {
 } from "@/lib/toxicity-filter-level";
 import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
-import { validateNickname } from "@/lib/nickname";
 import {
   canEditOwnPost,
   formatRemainingLabel,
@@ -110,6 +108,7 @@ type Post = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -131,6 +130,7 @@ type PostReply = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -190,7 +190,6 @@ export default function Home() {
   /** IDB 復元前に空状態を IDB へ書かない（表示が一瞬消える原因の一つ） */
   const [scoresPersistenceEnabled, setScoresPersistenceEnabled] =
     useState(false);
-  const [nicknameDraft, setNicknameDraft] = useState("");
   const [posts, setPosts] = useState<Post[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [timelineLoadingMore, setTimelineLoadingMore] = useState(false);
@@ -236,9 +235,6 @@ export default function Home() {
     open: boolean;
     message: string;
   }>({ open: false, message: "" });
-  const [nicknameModalError, setNicknameModalError] = useState<string | null>(
-    null
-  );
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [postEditSaving, setPostEditSaving] = useState(false);
@@ -259,18 +255,7 @@ export default function Home() {
     Boolean(userId) && profileReady && mustChangePassword;
   const needsInviteOnboarding =
     Boolean(userId) && profileReady && !inviteOnboardingCompleted;
-  const hasUsableNickname =
-    typeof profileNickname === "string" && profileNickname.trim().length > 0;
-  const needsNickname =
-    Boolean(userId) &&
-    profileReady &&
-    !needsPasswordChange &&
-    !needsInviteOnboarding &&
-    !hasUsableNickname;
-
-  useEffect(() => {
-    if (!needsNickname) setNicknameModalError(null);
-  }, [needsNickname]);
+  const needsNickname = false;
 
   useEffect(() => {
     if (!toast?.message?.trim()) return;
@@ -459,12 +444,13 @@ export default function Home() {
         nickname: string | null;
         avatar_url: string | null;
         avatar_placeholder_hex: string | null;
+        public_id: string | null;
       }
     >();
     if (authorIds.length > 0) {
       const { data: profiles, error: profileError } = await supabase
         .from("users")
-        .select("id, nickname, avatar_url, avatar_placeholder_hex")
+        .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
         .in("id", authorIds);
 
       if (profileError) {
@@ -478,6 +464,12 @@ export default function Home() {
           avatar_placeholder_hex:
             (row as { avatar_placeholder_hex?: string | null })
               .avatar_placeholder_hex ?? null,
+          public_id:
+            typeof (row as { public_id?: string | null }).public_id === "string"
+              ? String(
+                  (row as { public_id?: string | null }).public_id
+                ).trim() || null
+              : null,
         });
       }
     }
@@ -493,6 +485,9 @@ export default function Home() {
           : null,
         avatar_placeholder_hex: p.user_id
           ? (profileByUserId.get(p.user_id)?.avatar_placeholder_hex ?? null)
+          : null,
+        public_id: p.user_id
+          ? (profileByUserId.get(p.user_id)?.public_id ?? null)
           : null,
       },
     }));
@@ -594,12 +589,13 @@ export default function Home() {
           nickname: string | null;
           avatar_url: string | null;
           avatar_placeholder_hex: string | null;
+          public_id: string | null;
         }
       >();
       if (replyAuthorIds.length > 0) {
         const { data: rprofiles, error: rpe } = await supabase
           .from("users")
-          .select("id, nickname, avatar_url, avatar_placeholder_hex")
+          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
           .in("id", replyAuthorIds);
         if (rpe) {
           setErrorMessage(rpe.message);
@@ -612,6 +608,13 @@ export default function Home() {
             avatar_placeholder_hex:
               (row as { avatar_placeholder_hex?: string | null })
                 .avatar_placeholder_hex ?? null,
+            public_id:
+              typeof (row as { public_id?: string | null }).public_id ===
+              "string"
+                ? String(
+                    (row as { public_id?: string | null }).public_id
+                  ).trim() || null
+                : null,
           });
         }
       }
@@ -626,6 +629,7 @@ export default function Home() {
             nickname: rp?.nickname ?? null,
             avatar_url: rp?.avatar_url ?? null,
             avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
+            public_id: rp?.public_id ?? null,
           },
         });
         byPost[r.post_id] = arr;
@@ -949,7 +953,6 @@ export default function Home() {
         setMustChangePassword(false);
         setInviteLabel(null);
         setInviteOnboardingCompleted(true);
-        setNicknameDraft("");
       });
       return;
     }
@@ -963,7 +966,7 @@ export default function Home() {
       const { data, error } = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label, invite_onboarding_completed"
+          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label, invite_onboarding_completed, public_id"
         )
         .eq("id", userId)
         .maybeSingle();
@@ -1062,55 +1065,6 @@ export default function Home() {
     setProfileReady(false);
     setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
     setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
-    setNicknameDraft("");
-    void fetchPosts({ quiet: true });
-  };
-
-  const handleNicknameSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!userId) return;
-
-    const result = validateNickname(nicknameDraft);
-    if (!result.ok) {
-      setNicknameModalError(result.message);
-      return;
-    }
-
-    setNicknameModalError(null);
-    const hex = pickAvatarPlaceholderHex();
-    let savedPlaceholderHex: string | null = hex;
-    let { error } = await supabase
-      .from("users")
-      .update({
-        nickname: result.value,
-        avatar_placeholder_hex: hex,
-        nickname_locked: true,
-      })
-      .eq("id", userId);
-
-    if (error && isMissingAvatarPlaceholderHexError(error)) {
-      savedPlaceholderHex = null;
-      ({ error } = await supabase
-        .from("users")
-        .update({ nickname: result.value, nickname_locked: true })
-        .eq("id", userId));
-    }
-
-    if (error) {
-      const pgErr = error as PostgrestError;
-      if (pgErr.code === "23505") {
-        setNicknameModalError("そのニックネームは既に使われています。");
-        return;
-      }
-      const msg = (error.message ?? "").trim();
-      setNicknameModalError(msg || "保存に失敗しました。");
-      return;
-    }
-
-    setNicknameModalError(null);
-    setProfileNickname(result.value);
-    setProfilePlaceholderHex(savedPlaceholderHex);
-    setNicknameDraft("");
     void fetchPosts({ quiet: true });
   };
 
@@ -1416,16 +1370,19 @@ export default function Home() {
     const textContent = input.trim();
     if (!textContent && !composePostImage) {
       setComposeFormError("投稿内容を入力してください。");
+      setToast({ message: "投稿内容を入力してください。", tone: "error" });
       return;
     }
     if (!textContent && composePostImage) {
       const msg = "画像を添付する場合は本文を入力してください。";
       setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
     if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
       const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
       setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
 
@@ -1766,14 +1723,6 @@ export default function Home() {
                   onSubmit={handleSubmit}
                   className="touch-manipulation flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
                 >
-                  {composeFormError?.trim() ? (
-                    <div
-                      className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800"
-                      role="alert"
-                    >
-                      {composeFormError}
-                    </div>
-                  ) : null}
                   <div className="flex items-end gap-2">
                     <AutosizeTextarea
                       ref={composeTextareaRef}
@@ -1829,10 +1778,7 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={
-                        postSubmitting ||
-                        (!input.trim() && !composePostImage)
-                      }
+                      disabled={postSubmitting}
                       className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                     >
                       {postSubmitting ? "投稿中…" : "投稿"}
@@ -1873,8 +1819,9 @@ export default function Home() {
                   <div className="mb-1 flex min-w-0 items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       {post.user_id ? (
+                        post.users?.public_id ? (
                         <Link
-                          href={`/home/${post.user_id}`}
+                          href={`/@${post.users.public_id}`}
                           className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-blue-800"
                         >
                           <UserAvatar
@@ -1888,6 +1835,20 @@ export default function Home() {
                             {post.users?.nickname ?? "（未設定）"}
                           </span>
                         </Link>
+                        ) : (
+                        <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800">
+                          <UserAvatar
+                            name={post.users?.nickname ?? null}
+                            avatarUrl={post.users?.avatar_url ?? null}
+                            placeholderHex={
+                              post.users?.avatar_placeholder_hex ?? null
+                            }
+                          />
+                          <span className="line-clamp-2 min-w-0 flex-1 break-words">
+                            {post.users?.nickname ?? "（未設定）"}
+                          </span>
+                        </div>
+                        )
                       ) : (
                         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800">
                           <UserAvatar
@@ -2226,17 +2187,6 @@ export default function Home() {
         onCompleted={() => {
           setMustChangePassword(false);
         }}
-      />
-
-      <NicknameRequiredModal
-        open={Boolean(userId && profileReady && needsNickname)}
-        nicknameDraft={nicknameDraft}
-        onNicknameDraftChange={(v) => {
-          setNicknameModalError(null);
-          setNicknameDraft(v);
-        }}
-        onSubmit={handleNicknameSubmit}
-        errorMessage={nicknameModalError}
       />
 
       {toast?.message?.trim() ? (

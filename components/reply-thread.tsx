@@ -32,6 +32,7 @@ export type PostReplyRow = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -132,8 +133,9 @@ function ReplyItem({
       <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-gray-600">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {reply.user_id ? (
+            reply.users?.public_id ? (
             <Link
-              href={`/home/${reply.user_id}`}
+              href={`/@${reply.users.public_id}`}
               className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
             >
               <UserAvatar
@@ -145,6 +147,18 @@ function ReplyItem({
                 {reply.users?.nickname ?? "（未設定）"}
               </span>
             </Link>
+            ) : (
+            <span className="flex min-w-0 items-center gap-1 font-medium text-gray-800">
+              <UserAvatar
+                name={reply.users?.nickname ?? null}
+                avatarUrl={reply.users?.avatar_url ?? null}
+                placeholderHex={reply.users?.avatar_placeholder_hex ?? null}
+              />
+              <span className="truncate">
+                {reply.users?.nickname ?? "（未設定）"}
+              </span>
+            </span>
+            )
           ) : null}
           <span className="text-gray-400">
             {reply.created_at

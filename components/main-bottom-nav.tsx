@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { requestOpenCompose } from "@/components/compose-open-bus";
+import { createClient } from "@/lib/supabase/client";
+
+const supabase = createClient();
 
 type NavProps = {
   /** ログイン済みでナビを出す */
@@ -61,7 +64,7 @@ function ActivityIcon({ active }: { active: boolean }) {
   );
 }
 
-function HomeIcon({ active }: { active: boolean }) {
+function ProfileIcon({ active }: { active: boolean }) {
   return (
     <svg
       width="24"
@@ -72,10 +75,16 @@ function HomeIcon({ active }: { active: boolean }) {
       aria-hidden
     >
       <path
-        d="M4 10.5 12 3l8 7.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-9.5z"
+        d="M12 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
         stroke="currentColor"
         strokeWidth="1.5"
-        strokeLinejoin="round"
+        fill="none"
+      />
+      <path
+        d="M5 20.5v-.5a7 7 0 0 1 14 0v.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
         fill="none"
       />
     </svg>
@@ -120,12 +129,55 @@ export function MainBottomNav({
 }: NavProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [myPublicId, setMyPublicId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!show) {
+      setMyPublicId(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        if (!cancelled) setMyPublicId(null);
+        return;
+      }
+      const { data } = await supabase
+        .from("users")
+        .select("public_id")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const raw = data?.public_id;
+      setMyPublicId(
+        typeof raw === "string" && raw.trim() ? raw.trim() : null
+      );
+    };
+    void load();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void load();
+    });
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [show]);
 
   if (!show) return null;
 
+  const profileHref = myPublicId ? `/@${myPublicId}` : "/home";
   const isTimeline = pathname === "/";
-  const isActivity = pathname === "/home/activity" || pathname.startsWith("/home/activity");
-  const isHome = pathname === "/home";
+  const isActivity =
+    pathname === "/home/activity" || pathname.startsWith("/home/activity");
+  const onOwnProfile =
+    myPublicId != null && pathname === `/@${myPublicId}`;
+  const isProfile =
+    pathname === "/home" || onOwnProfile;
 
   const navBtn =
     "relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-medium text-gray-600 min-h-[52px] max-w-[20%]";
@@ -167,7 +219,11 @@ export function MainBottomNav({
           aria-label="投稿を書く"
           title="投稿"
           onClick={() => {
-            if (pathname !== "/" && pathname !== "/home") {
+            if (
+              pathname !== "/" &&
+              pathname !== "/home" &&
+              !onOwnProfile
+            ) {
               router.push("/");
               window.setTimeout(() => requestOpenCompose(), 80);
             } else {
@@ -179,13 +235,13 @@ export function MainBottomNav({
         </button>
 
         <Link
-          href="/home"
+          href={profileHref}
           className={navBtn}
-          title="マイホーム"
-          aria-current={isHome ? "page" : undefined}
+          title="プロフィール"
+          aria-current={isProfile ? "page" : undefined}
         >
-          <HomeIcon active={isHome} />
-          <span className={isHome ? "text-sky-700" : ""}>ホーム</span>
+          <ProfileIcon active={isProfile} />
+          <span className={isProfile ? "text-sky-700" : ""}>プロフ</span>
         </Link>
 
         <button

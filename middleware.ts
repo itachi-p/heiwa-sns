@@ -2,7 +2,15 @@ import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 export async function middleware(request: NextRequest) {
-  return await updateSession(request);
+  const { pathname } = request.nextUrl;
+  let rewritePath: string | undefined;
+  if (pathname.startsWith("/@") && pathname.length > 2) {
+    const rest = pathname.slice(2);
+    if (rest && !rest.includes("/")) {
+      rewritePath = `/p/${rest}`;
+    }
+  }
+  return await updateSession(request, rewritePath);
 }
 
 export const config = {

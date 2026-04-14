@@ -1,6 +1,7 @@
 "use client";
 
 import { InviteOnboardingLayer } from "@/components/invite-onboarding-layer";
+import { PublicIdRequiredLayer } from "@/components/public-id-required-layer";
 import { MainBottomNav } from "@/components/main-bottom-nav";
 import { SETTINGS_OPEN_EVENT } from "@/components/settings-open-bus";
 import { ToxicitySettingsModal } from "@/components/toxicity-settings-modal";
@@ -52,6 +53,7 @@ export default function MainShellLayout({
         {children}
       </div>
       <InviteOnboardingLayer />
+      <PublicIdRequiredLayer />
       <ToxicitySettingsModal open={settingsOpen} onClose={closeSettings} />
       <MainBottomNav
         show={showNav}
