@@ -5,7 +5,6 @@ import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
-import { NicknameRequiredModal } from "@/components/nickname-required-modal";
 import {
   ReplyComposerModal,
   ReplyBubbleIcon,
@@ -46,9 +45,8 @@ import {
   POST_AND_REPLY_MAX_CHARS,
   PROFILE_BIO_MAX_CHARS,
 } from "@/lib/compose-text-limits";
-import { validateNickname } from "@/lib/nickname";
+import { validateNicknameOptional } from "@/lib/nickname";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
-import { requestOpenSettings } from "@/components/settings-open-bus";
 import { AppToastPortal } from "@/components/app-toast-portal";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { sanitizeExternalProfileUrl } from "@/lib/sanitize-external-url";
@@ -112,6 +110,7 @@ type Post = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -129,6 +128,7 @@ type PostReply = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -166,7 +166,7 @@ export default function HomePage() {
   const [inviteLabel, setInviteLabel] = useState<string | null>(null);
   const [inviteOnboardingCompleted, setInviteOnboardingCompleted] =
     useState(true);
-  const [nicknameLocked, setNicknameLocked] = useState(false);
+  const [profilePublicId, setProfilePublicId] = useState<string | null>(null);
   const [profileExternalUrl, setProfileExternalUrl] = useState("");
   const [externalUrlDraft, setExternalUrlDraft] = useState("");
   const [profileBio, setProfileBio] = useState("");
@@ -205,9 +205,6 @@ export default function HomePage() {
   type ToastState = { message: string; tone: "default" | "error" };
   const [toast, setToast] = useState<ToastState | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [nicknameModalError, setNicknameModalError] = useState<string | null>(
-    null
-  );
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [postEditSaving, setPostEditSaving] = useState(false);
@@ -260,18 +257,7 @@ export default function HomePage() {
     Boolean(userId) && profileReady && mustChangePassword;
   const needsInviteOnboarding =
     Boolean(userId) && profileReady && !inviteOnboardingCompleted;
-  const hasUsableNickname =
-    typeof profileNickname === "string" && profileNickname.trim().length > 0;
-  const needsNickname =
-    Boolean(userId) &&
-    profileReady &&
-    !needsPasswordChange &&
-    !needsInviteOnboarding &&
-    !hasUsableNickname;
-
-  useEffect(() => {
-    if (!needsNickname) setNicknameModalError(null);
-  }, [needsNickname]);
+  const needsNickname = false;
 
   useEffect(() => {
     if (!toast?.message?.trim()) return;
@@ -389,7 +375,7 @@ export default function HomePage() {
     const profileRes = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label, invite_onboarding_completed, nickname_locked, profile_external_url"
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -403,8 +389,8 @@ export default function HomePage() {
       must_change_password?: boolean | null;
       invite_label?: string | null;
       invite_onboarding_completed?: boolean | null;
-      nickname_locked?: boolean | null;
       profile_external_url?: string | null;
+      public_id?: string | null;
     };
 
     let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
@@ -412,7 +398,7 @@ export default function HomePage() {
       const fallback = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label, invite_onboarding_completed, nickname_locked, profile_external_url"
+          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id"
         )
         .eq("id", uid)
         .maybeSingle();
@@ -471,6 +457,10 @@ export default function HomePage() {
     const avatarUrl = profile?.avatar_url ?? null;
     const placeholderHex = profile?.avatar_placeholder_hex ?? null;
     const bio = profile?.bio ?? "";
+    const pubId =
+      typeof profile?.public_id === "string"
+        ? profile.public_id.trim() || null
+        : null;
     if (!stillThisViewer()) {
       return;
     }
@@ -480,6 +470,7 @@ export default function HomePage() {
         nickname,
         avatar_url: avatarUrl,
         avatar_placeholder_hex: placeholderHex,
+        public_id: pubId,
       },
     }));
 
@@ -517,12 +508,13 @@ export default function HomePage() {
           nickname: string | null;
           avatar_url: string | null;
           avatar_placeholder_hex: string | null;
+          public_id: string | null;
         }
       >();
       if (replyAuthorIds.length > 0) {
         const { data: rprofiles, error: rpe } = await supabase
           .from("users")
-          .select("id, nickname, avatar_url, avatar_placeholder_hex")
+          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
           .in("id", replyAuthorIds);
         if (rpe) {
           if (stillThisViewer()) setErrorMessage(rpe.message);
@@ -535,6 +527,13 @@ export default function HomePage() {
             avatar_placeholder_hex:
               (row as { avatar_placeholder_hex?: string | null })
                 .avatar_placeholder_hex ?? null,
+            public_id:
+              typeof (row as { public_id?: string | null }).public_id ===
+              "string"
+                ? String(
+                    (row as { public_id?: string | null }).public_id
+                  ).trim() || null
+                : null,
           });
         }
       }
@@ -549,6 +548,7 @@ export default function HomePage() {
             nickname: rp?.nickname ?? null,
             avatar_url: rp?.avatar_url ?? null,
             avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
+            public_id: rp?.public_id ?? null,
           },
         });
         byPost[r.post_id] = arr;
@@ -576,7 +576,7 @@ export default function HomePage() {
     setInviteOnboardingCompleted(
       Boolean(profile?.invite_onboarding_completed)
     );
-    setNicknameLocked(Boolean(profile?.nickname_locked));
+    setProfilePublicId(pubId);
     const extUrl =
       typeof profile?.profile_external_url === "string"
         ? profile.profile_external_url.trim()
@@ -895,7 +895,7 @@ export default function HomePage() {
       setMustChangePassword(false);
       setInviteLabel(null);
       setInviteOnboardingCompleted(true);
-      setNicknameLocked(false);
+      setProfilePublicId(null);
       setProfileExternalUrl("");
       setExternalUrlDraft("");
       setProfilePlaceholderHex(null);
@@ -931,7 +931,7 @@ export default function HomePage() {
     setMustChangePassword(false);
     setInviteLabel(null);
     setInviteOnboardingCompleted(true);
-    setNicknameLocked(false);
+    setProfilePublicId(null);
     setProfileExternalUrl("");
     setExternalUrlDraft("");
     setErrorMessage(null);
@@ -960,7 +960,7 @@ export default function HomePage() {
     setMustChangePassword(false);
     setInviteLabel(null);
     setInviteOnboardingCompleted(true);
-    setNicknameLocked(false);
+    setProfilePublicId(null);
     setProfileExternalUrl("");
     setExternalUrlDraft("");
     setProfileBio("");
@@ -1350,16 +1350,19 @@ export default function HomePage() {
     const textContent = draft.trim();
     if (!textContent && !composePostImage) {
       setComposeFormError("投稿内容を入力してください。");
+      setToast({ message: "投稿内容を入力してください。", tone: "error" });
       return;
     }
     if (!textContent && composePostImage) {
       const msg = "画像を添付する場合は本文を入力してください。";
       setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
     if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
       const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
       setComposeFormError(msg);
+      setToast({ message: msg, tone: "error" });
       return;
     }
 
@@ -1555,14 +1558,10 @@ export default function HomePage() {
     e.preventDefault();
     if (!userId) return;
 
-    let nicknameValue: string | undefined;
-    if (!nicknameLocked) {
-      const result = validateNickname(nicknameDraft);
-      if (!result.ok) {
-        setErrorMessage(result.message);
-        return;
-      }
-      nicknameValue = result.value;
+    const nickResult = validateNicknameOptional(nicknameDraft);
+    if (!nickResult.ok) {
+      setErrorMessage(nickResult.message);
+      return;
     }
 
     const urlSan = sanitizeExternalProfileUrl(externalUrlDraft);
@@ -1615,10 +1614,8 @@ export default function HomePage() {
       bio: bioDraft.trim(),
       interest_custom_creations_count: customCreationsUsed,
       profile_external_url: urlSan.href || null,
+      nickname: nickResult.value,
     };
-    if (nicknameValue != null) {
-      baseUpdate.nickname = nicknameValue;
-    }
     const patch = !profilePlaceholderHex
       ? { ...baseUpdate, avatar_placeholder_hex: hex }
       : baseUpdate;
@@ -1643,9 +1640,7 @@ export default function HomePage() {
       return;
     }
 
-    if (nicknameValue != null) {
-      setProfileNickname(nicknameValue);
-    }
+    setProfileNickname(nickResult.value);
     setProfileBio(bioDraft.trim());
     setProfileExternalUrl(urlSan.href);
     if (appliedHex) {
@@ -1654,57 +1649,6 @@ export default function HomePage() {
     await fetchOwnPosts(userId);
     setProfileSaving(false);
     setProfileEditOpen(false);
-  };
-
-  const handleNicknameRequiredSubmit = async (
-    e: React.FormEvent<HTMLFormElement>
-  ) => {
-    e.preventDefault();
-    if (!userId) return;
-
-    const result = validateNickname(nicknameDraft);
-    if (!result.ok) {
-      setNicknameModalError(result.message);
-      return;
-    }
-
-    setNicknameModalError(null);
-    const hex = pickAvatarPlaceholderHex();
-    let savedPlaceholderHex: string | null = hex;
-    let { error } = await supabase
-      .from("users")
-      .update({
-        nickname: result.value,
-        avatar_placeholder_hex: hex,
-        nickname_locked: true,
-      })
-      .eq("id", userId);
-
-    if (error && isMissingAvatarPlaceholderHexError(error)) {
-      savedPlaceholderHex = null;
-      ({ error } = await supabase
-        .from("users")
-        .update({ nickname: result.value, nickname_locked: true })
-        .eq("id", userId));
-    }
-
-    if (error) {
-      const pgErr = error as PostgrestError;
-      if (pgErr.code === "23505") {
-        setNicknameModalError("そのニックネームは既に使われています。");
-        return;
-      }
-      const msg = (error.message ?? "").trim();
-      setNicknameModalError(msg || "保存に失敗しました。");
-      return;
-    }
-
-    setNicknameModalError(null);
-    setProfileNickname(result.value);
-    setProfilePlaceholderHex(savedPlaceholderHex);
-    setNicknameDraft(result.value);
-    setNicknameLocked(true);
-    await fetchOwnPosts(userId);
   };
 
   const toggleProfileEdit = () => {
@@ -1950,9 +1894,16 @@ export default function HomePage() {
               />
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex min-w-0 items-center justify-between gap-2">
-                  <p className="min-w-0 truncate text-lg font-semibold text-gray-800">
-                    {profileNickname ?? "ニックネーム未設定"}
-                  </p>
+                  <div className="min-w-0">
+                    {profilePublicId ? (
+                      <p className="font-mono text-xs text-gray-500">
+                        @{profilePublicId}
+                      </p>
+                    ) : null}
+                    <p className="min-w-0 truncate text-lg font-semibold text-gray-800">
+                      {profileNickname ?? "ニックネーム未設定"}
+                    </p>
+                  </div>
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
@@ -2050,28 +2001,16 @@ export default function HomePage() {
                 onSubmit={handleProfileSave}
                 className="flex min-h-0 flex-1 flex-col"
               >
-                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-gray-100 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <h3
-                      id="profile-edit-title"
-                      className="text-sm font-semibold text-gray-900"
-                    >
-                      プロフィール編集
-                    </h3>
-                    <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
-                      登録日 {joinedAtLabel ?? "不明"}
-                      <span className="text-gray-300"> · </span>
-                      閲覧フィルタは
-                      <button
-                        type="button"
-                        className="mx-0.5 font-medium text-sky-800 underline-offset-2 hover:underline"
-                        onClick={() => requestOpenSettings()}
-                      >
-                        設定
-                      </button>
-                      から
-                    </p>
-                  </div>
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-100 px-4 py-2.5">
+                  <h3
+                    id="profile-edit-title"
+                    className="text-sm font-semibold text-gray-900"
+                  >
+                    プロフィール編集
+                  </h3>
+                  <p className="shrink-0 text-[11px] text-gray-500">
+                    登録日 {joinedAtLabel ?? "不明"}
+                  </p>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
                   <div className="space-y-4">
@@ -2096,55 +2035,68 @@ export default function HomePage() {
                           onChange={(e) => void handleAvatarUpload(e)}
                         />
                       </label>
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-                          <span className="text-xs font-medium text-gray-700">
-                            名前
-                          </span>
-                          {nicknameLocked ? (
-                            <span className="text-[11px] text-gray-500">
-                              ※先行体験期間中は名前を変更できません
-                            </span>
-                          ) : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap gap-x-6 gap-y-3">
+                          <div className="min-w-[8rem] flex-1">
+                            <p className="text-xs text-gray-500">公開ID</p>
+                            <p className="break-all font-mono text-sm text-gray-800">
+                              {profilePublicId
+                                ? `@${profilePublicId}`
+                                : "（未設定）"}
+                            </p>
+                          </div>
+                          <div className="min-w-[8rem] flex-1">
+                            <label
+                              htmlFor="profile-nickname"
+                              className="text-xs font-medium text-gray-700"
+                            >
+                              ニックネーム
+                            </label>
+                            <input
+                              id="profile-nickname"
+                              value={nicknameDraft}
+                              onChange={(e) =>
+                                setNicknameDraft(
+                                  e.target.value.replace(/[\n\r]/g, "")
+                                )
+                              }
+                              maxLength={20}
+                              className="mt-0.5 w-full border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm outline-none focus:border-blue-500"
+                            />
+                          </div>
                         </div>
-                        <input
-                          value={nicknameDraft}
-                          onChange={(e) =>
-                            setNicknameDraft(
-                              e.target.value.replace(/[\n\r]/g, "")
-                            )
-                          }
-                          maxLength={20}
-                          disabled={nicknameLocked}
-                          className="w-full border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:text-gray-500"
-                        />
                       </div>
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-gray-700">
-                        自己紹介
-                      </label>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <label
+                          htmlFor="profile-bio"
+                          className="text-xs font-medium text-gray-700"
+                        >
+                          自己紹介
+                        </label>
+                        <span className="shrink-0 text-[11px] text-gray-400">
+                          {bioDraft.length}/{PROFILE_BIO_MAX_CHARS}
+                        </span>
+                      </div>
                       <AutosizeTextarea
+                        id="profile-bio"
                         value={bioDraft}
                         onChange={(e) => setBioDraft(e.target.value)}
                         maxRows={8}
                         maxLength={PROFILE_BIO_MAX_CHARS}
                         className="mt-1 w-full resize-none overflow-hidden border-0 border-b border-gray-200 bg-transparent px-0 py-1.5 text-sm leading-snug outline-none focus:border-blue-500"
                       />
-                      <p className="mt-0.5 text-right text-[11px] text-gray-400">
-                        {bioDraft.length}/{PROFILE_BIO_MAX_CHARS}
-                      </p>
                     </div>
                     <div>
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-                        <label className="text-xs font-medium text-gray-700">
-                          外部リンク（任意）
-                        </label>
-                        <span className="text-[11px] text-gray-500">
-                          ※httpsのみ対応
-                        </span>
-                      </div>
+                      <label
+                        htmlFor="profile-external-url"
+                        className="text-xs font-medium text-gray-700"
+                      >
+                        外部リンク
+                      </label>
                       <input
+                        id="profile-external-url"
                         type="url"
                         value={externalUrlDraft}
                         onChange={(e) => setExternalUrlDraft(e.target.value)}
@@ -2353,14 +2305,6 @@ export default function HomePage() {
                   onSubmit={handleSubmitPost}
                   className="touch-manipulation mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
                 >
-                {composeFormError?.trim() ? (
-                  <div
-                    className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-800"
-                    role="alert"
-                  >
-                    {composeFormError}
-                  </div>
-                ) : null}
                 <div className="flex items-end gap-2">
                   <AutosizeTextarea
                     ref={composeTextareaRef}
@@ -2416,9 +2360,7 @@ export default function HomePage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="submit"
-                    disabled={
-                      submitting || (!draft.trim() && !composePostImage)
-                    }
+                    disabled={submitting}
                     className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
                   >
                     {submitting ? "投稿中..." : "投稿"}
@@ -2685,17 +2627,6 @@ export default function HomePage() {
         onCompleted={() => {
           setMustChangePassword(false);
         }}
-      />
-
-      <NicknameRequiredModal
-        open={Boolean(userId && profileReady && needsNickname)}
-        nicknameDraft={nicknameDraft}
-        onNicknameDraftChange={(v) => {
-          setNicknameModalError(null);
-          setNicknameDraft(v);
-        }}
-        onSubmit={handleNicknameRequiredSubmit}
-        errorMessage={nicknameModalError}
       />
 
       {toast?.message?.trim() ? (
