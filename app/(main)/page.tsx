@@ -919,15 +919,24 @@ export default function Home() {
   };
 
   useEffect(() => {
+    const setUserIfChanged = (next: User | null) => {
+      setUser((prev) => {
+        const prevId = prev?.id ?? null;
+        const nextId = next?.id ?? null;
+        if (prevId === nextId) return prev;
+        return next;
+      });
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      setUserIfChanged(session?.user ?? null);
       setAuthReady(true);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      setUserIfChanged(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();
