@@ -847,8 +847,13 @@ export default function HomePage() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserIfChanged(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || event === "USER_DELETED") {
+        setUserIfChanged(null);
+        return;
+      }
+      if (!session?.user) return;
+      setUserIfChanged(session.user);
     });
 
     return () => subscription.unsubscribe();
