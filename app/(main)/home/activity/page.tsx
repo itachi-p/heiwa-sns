@@ -107,6 +107,7 @@ export default function HomeActivityPage() {
   const [loading, setLoading] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [inviteLabel, setInviteLabel] = useState<string | null>(null);
+  const loadedActivityUserIdRef = useRef<string | null>(null);
 
   const userId = user?.id ?? null;
   const needsPasswordChange =
@@ -247,10 +248,14 @@ export default function HomeActivityPage() {
   useEffect(() => {
     let cancelled = false;
     if (!userId) {
+      loadedActivityUserIdRef.current = null;
       startTransition(() => {
         setMustChangePassword(false);
         setInviteLabel(null);
       });
+      return;
+    }
+    if (loadedActivityUserIdRef.current === userId && profileReady) {
       return;
     }
     void (async () => {
@@ -258,6 +263,7 @@ export default function HomeActivityPage() {
       setProfileReady(false);
       await fetchActivity(userId);
       if (cancelled) return;
+      loadedActivityUserIdRef.current = userId;
       setProfileReady(true);
     })();
     return () => {

@@ -247,6 +247,7 @@ export default function Home() {
   const postScoresByIdRef = useRef(postScoresById);
   const replyScoresByIdRef = useRef(replyScoresById);
   const secondModerationBusyRef = useRef<Set<string>>(new Set());
+  const loadedProfileUserIdRef = useRef<string | null>(null);
   postScoresByIdRef.current = postScoresById;
   replyScoresByIdRef.current = replyScoresById;
   const userId = user?.id ?? null;
@@ -392,7 +393,8 @@ export default function Home() {
       setTimelineLoadingMore(true);
     } else {
       if (!quiet) {
-        setTimelineLoading(true);
+        // Keep existing rows on screen for refreshes; show full loading only at first load.
+        setTimelineLoading(posts.length === 0);
       }
       setTimelineHasMore(true);
       setTimelineOffset(0);
@@ -963,6 +965,7 @@ export default function Home() {
   /** ログイン後: users 行の確保 → nickname 取得 */
   useEffect(() => {
     if (!userId || !user) {
+      loadedProfileUserIdRef.current = null;
       startTransition(() => {
         setProfileReady(false);
         setProfileNickname(null);
@@ -970,6 +973,10 @@ export default function Home() {
         setInviteLabel(null);
         setInviteOnboardingCompleted(true);
       });
+      return;
+    }
+
+    if (loadedProfileUserIdRef.current === userId && profileReady) {
       return;
     }
 
@@ -1014,6 +1021,7 @@ export default function Home() {
       setToxicityOverThresholdBehavior(
         await fetchToxicityOverThresholdBehavior(supabase, userId)
       );
+      loadedProfileUserIdRef.current = userId;
       setProfileReady(true);
     })();
   }, [userId, user]);

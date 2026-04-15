@@ -246,6 +246,7 @@ export default function HomePage() {
   const postScoresByIdRef = useRef(postScoresById);
   const replyScoresByIdRef = useRef(replyScoresById);
   const secondModerationBusyRef = useRef<Set<string>>(new Set());
+  const loadedHomeUserIdRef = useRef<string | null>(null);
   postScoresByIdRef.current = postScoresById;
   replyScoresByIdRef.current = replyScoresById;
 
@@ -900,6 +901,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!userId || !user) {
+      loadedHomeUserIdRef.current = null;
       setProfileReady(false);
       setProfileNickname(null);
       setProfileAvatarUrl(null);
@@ -925,6 +927,10 @@ export default function HomePage() {
       setErrorMessage(null);
       setToxicityFilterLevel(DEFAULT_TOXICITY_FILTER_LEVEL);
       setToxicityOverThresholdBehavior(DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR);
+      return;
+    }
+
+    if (loadedHomeUserIdRef.current === userId && profileReady) {
       return;
     }
 
@@ -955,6 +961,7 @@ export default function HomePage() {
       await ensurePublicUserRow(user);
       await fetchOwnPosts(userId);
       if (homeSessionUserIdRef.current === userId) {
+        loadedHomeUserIdRef.current = userId;
         setProfileReady(true);
       }
     })();
