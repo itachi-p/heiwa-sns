@@ -31,7 +31,7 @@
 | must_change_password | boolean | デフォルト false。true のときログイン後にパスワード変更を必須にする |
 | invite_label | text | 任意。非 NULL 値は一意（招待識別用ラベル） |
 | nickname | text | ユニーク等はマイグレーション参照。未設定可 |
-| public_id | text | 任意。公開プロフィールURL用（`@handle`）。未設定可、設定済みは一意 |
+| public_id | text | 任意。公開表示用（`@handle`）。未設定可、設定済みは一意。登録時はアプリで5〜20文字・英数字と `._-` のみ（小文字化） |
 | avatar_url | text | |
 | avatar_placeholder_hex | text | |
 | bio | text | |

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   isValidPublicIdFormat,
   normalizePublicId,
+  PUBLIC_ID_MAX_LEN,
   publicIdValidationMessage,
 } from "@/lib/public-id";
 
@@ -114,8 +115,7 @@ export function PublicIdRequiredLayer() {
           公開IDを設定
         </h2>
         <p className="mt-2 text-sm text-gray-600">
-          プロフィールのURLに使います。英小文字で始め、3〜30文字。英数字・._-
-          のみ。設定後は変更できません。
+          公開するときのIDです（@の後ろ）。英数字と ._- のみ、5〜20文字。設定後は変更できません。
         </p>
         <div className="mt-3 flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm">
           <span className="text-gray-500">@</span>
@@ -128,7 +128,7 @@ export function PublicIdRequiredLayer() {
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
-            maxLength={30}
+            maxLength={PUBLIC_ID_MAX_LEN}
             placeholder="your-id"
           />
         </div>

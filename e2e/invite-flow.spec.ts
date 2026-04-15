@@ -43,7 +43,7 @@ test("lent user: login → optional gates → first post on timeline", async ({
   test.setTimeout(120_000);
 
   const seq = String(Date.now() % 10_000).padStart(4, "0");
-  /** `lib/public-id.ts`: 英小文字始まり3〜30文字 */
+  /** `lib/public-id.ts`: 5〜20文字、英数字と ._- のみ（入力は小文字化） */
   const publicHandle = `e${seq}`.slice(0, 30);
   const postBody = `先行E2Eの確認です。${publicHandle} として投稿しています。`;
 
