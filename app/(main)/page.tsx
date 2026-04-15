@@ -115,6 +115,7 @@ type Post = {
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 const RELATION_PENALTY_WINDOW_DAYS = 14;
 const TIMELINE_PAGE_SIZE = 20;
+const TIMELINE_SNAPSHOT_KEY = "timeline_snapshot_v1";
 
 type PostReply = {
   id: number;
@@ -257,6 +258,26 @@ export default function Home() {
   const needsInviteOnboarding =
     Boolean(userId) && profileReady && !inviteOnboardingCompleted;
   const needsNickname = false;
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(TIMELINE_SNAPSHOT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        posts?: Post[];
+        repliesByPost?: Record<number, PostReply[]>;
+      };
+      if (Array.isArray(parsed.posts) && parsed.posts.length > 0) {
+        setPosts(parsed.posts);
+        setTimelineLoading(false);
+      }
+      if (parsed.repliesByPost && typeof parsed.repliesByPost === "object") {
+        setRepliesByPost(parsed.repliesByPost);
+      }
+    } catch {
+      // Ignore malformed cache and continue normal loading.
+    }
+  }, []);
 
   useEffect(() => {
     if (!toast?.message?.trim()) return;
@@ -559,8 +580,10 @@ export default function Home() {
 
     const postIds = timelinePosts.map((p) => p.id);
     let replyRowsFlat: PostReply[] = [];
+    let snapshotRepliesByPost: Record<number, PostReply[]> = {};
     if (postIds.length === 0) {
       setRepliesByPost({});
+      snapshotRepliesByPost = {};
     } else {
       const { data: replyRows, error: replyErr } = await supabase
         .from("post_replies")
@@ -637,6 +660,7 @@ export default function Home() {
         byPost[r.post_id] = arr;
       }
       setRepliesByPost(byPost);
+      snapshotRepliesByPost = byPost;
       replyRowsFlat = Object.values(byPost).flat();
     }
 
@@ -652,6 +676,17 @@ export default function Home() {
     }
 
     setErrorMessage(null);
+    try {
+      window.sessionStorage.setItem(
+        TIMELINE_SNAPSHOT_KEY,
+        JSON.stringify({
+          posts: timelinePosts,
+          repliesByPost: snapshotRepliesByPost,
+        })
+      );
+    } catch {
+      // Storage can fail in private mode/quota limits; non-fatal.
+    }
     } finally {
       setTimelineLoading(false);
       setTimelineLoadingMore(false);
@@ -1739,7 +1774,7 @@ export default function Home() {
             {errorMessage}
           </div>
         ) : null}
-        {authReady && !(userId && !profileReady) ? (
+        {authReady && (!(userId && !profileReady) || posts.length > 0) ? (
           <>
             {canInteract && composeOpen ? (
               <div className="touch-manipulation fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
@@ -2156,7 +2191,7 @@ export default function Home() {
           </>
         ) : null}
 
-        {userId && !profileReady ? (
+        {userId && !profileReady && posts.length === 0 ? (
           <p className="text-gray-600">プロフィールを読み込み中…</p>
         ) : null}
       </div>
