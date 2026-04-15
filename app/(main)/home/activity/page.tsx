@@ -130,7 +130,7 @@ export default function HomeActivityPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" || event === "USER_DELETED") {
+      if (event === "SIGNED_OUT") {
         setUserIfChanged(null);
         return;
       }
