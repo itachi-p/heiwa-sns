@@ -156,11 +156,11 @@ export function ReplyComposerModal({
               ref={draftTextareaRef}
               value={draft}
               onChange={(e) => onDraftChange(e.target.value)}
-              rows={3}
+              rows={1}
               maxLength={POST_AND_REPLY_MAX_CHARS}
               disabled={submitting}
               placeholder="返信を入力…"
-              className="min-h-0 min-w-0 flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
+              className="min-h-0 min-w-0 flex-1 resize-none rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
             />
           </div>
         </div>

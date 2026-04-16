@@ -233,6 +233,9 @@ export default function HomePage() {
   const [repliesByPost, setRepliesByPost] = useState<
     Record<number, PostReply[]>
   >({});
+  const [openedReplyPosts, setOpenedReplyPosts] = useState<Set<number>>(
+    () => new Set()
+  );
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
   const [replySubmittingPostId, setReplySubmittingPostId] = useState<
     number | null
@@ -1254,6 +1257,15 @@ export default function HomePage() {
     }
     if (editingReplyId === replyId) setEditingReplyId(null);
     await fetchOwnPosts(userId);
+  };
+
+  const toggleReplyPanel = (postId: number) => {
+    setOpenedReplyPosts((prev) => {
+      const next = new Set(prev);
+      if (next.has(postId)) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
   };
 
   const handleSaveReplyEdit = async (replyId: number) => {
@@ -2551,9 +2563,7 @@ export default function HomePage() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (!tryInteraction()) return;
-                          setReplyComposerPostId(post.id);
-                          setReplyParentReplyId(null);
+                          toggleReplyPanel(post.id);
                         }}
                         className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
                         aria-label="返信"
@@ -2562,10 +2572,32 @@ export default function HomePage() {
                         <ReplyBubbleIcon />
                       </button>
                     </div>
-                    {(repliesByPost[post.id] ?? []).length > 0 ? (
+                    {openedReplyPosts.has(post.id) ? (
                       <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
+                        {canInteract ? (
+                          <div className="mb-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!tryInteraction()) return;
+                                setReplyComposerPostId(post.id);
+                                setReplyParentReplyId(null);
+                              }}
+                              className="rounded-md border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                            >
+                              返信を書く
+                            </button>
+                          </div>
+                        ) : null}
                         {(() => {
                           const flat = repliesByPost[post.id] ?? [];
+                          if (flat.length === 0) {
+                            return (
+                              <p className="text-xs text-gray-500">
+                                返信はまだありません。
+                              </p>
+                            );
+                          }
                           const { roots, childrenByParent } =
                             partitionRepliesByParent(flat);
                           return (
@@ -2595,10 +2627,6 @@ export default function HomePage() {
                                 void handleSaveReplyEdit(rid)
                               }
                               onDelete={handleDeleteReply}
-                              onReplyToReply={(parentReplyId) => {
-                                setReplyComposerPostId(post.id);
-                                setReplyParentReplyId(parentReplyId);
-                              }}
                             />
                           );
                         })()}

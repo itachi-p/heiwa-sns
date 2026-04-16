@@ -4,7 +4,6 @@ import Link from "next/link";
 import React, { useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
-import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   canEditOwnReply,
@@ -89,7 +88,6 @@ type ItemProps = {
   onCancelEdit: () => void;
   onSaveEdit: (replyId: number) => void;
   onDelete: (replyId: number) => void;
-  onReplyToReply: (parentReplyId: number) => void;
 };
 
 function ReplyItem({
@@ -110,7 +108,6 @@ function ReplyItem({
   onCancelEdit,
   onSaveEdit,
   onDelete,
-  onReplyToReply,
 }: ItemProps) {
   const name = displayName(reply.users?.nickname, reply.users?.public_id);
   const [foldExpanded, setFoldExpanded] = useState(false);
@@ -137,11 +134,11 @@ function ReplyItem({
   return (
     <li
       className={[
-        "rounded-md bg-gray-50/80 px-2 py-2",
+        "relative rounded-md bg-gray-50/80 px-2 py-2",
         depth > 0 ? "ml-1 border-l-2 border-gray-200 pl-3" : "",
       ].join(" ")}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-gray-600">
+      <div className="flex flex-wrap items-start gap-2 pr-28 text-xs text-gray-600">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {reply.user_id ? (
             reply.users?.public_id ? (
@@ -177,22 +174,11 @@ function ReplyItem({
               : ""}
           </span>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1">
+        <div className="absolute right-2 top-2 flex shrink-0 flex-wrap items-center gap-1">
           {showEdit ? (
             <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
               編集残り {remainingLabel}
             </span>
-          ) : null}
-          {canInteract ? (
-            <button
-              type="button"
-              onClick={() => onReplyToReply(reply.id)}
-              className="inline-flex items-center justify-center rounded border border-gray-300 bg-white p-1 text-gray-700 hover:bg-gray-50"
-              aria-label="返信"
-              title="返信"
-            >
-              <ReplyBubbleIcon className="h-4 w-4" />
-            </button>
           ) : null}
           {showEdit ? (
             editingReplyId === reply.id ? (
@@ -301,7 +287,6 @@ function ReplyItem({
               onCancelEdit={onCancelEdit}
               onSaveEdit={onSaveEdit}
               onDelete={onDelete}
-              onReplyToReply={onReplyToReply}
             />
           ))}
         </ul>
@@ -330,7 +315,6 @@ type ThreadProps = {
   onCancelEdit: () => void;
   onSaveEdit: (replyId: number) => void;
   onDelete: (replyId: number) => void;
-  onReplyToReply: (parentReplyId: number) => void;
 };
 
 export function ReplyThread(props: ThreadProps) {
@@ -356,7 +340,6 @@ export function ReplyThread(props: ThreadProps) {
           onCancelEdit={props.onCancelEdit}
           onSaveEdit={props.onSaveEdit}
           onDelete={props.onDelete}
-          onReplyToReply={props.onReplyToReply}
         />
       ))}
     </ul>
