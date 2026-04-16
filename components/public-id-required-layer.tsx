@@ -115,16 +115,15 @@ export function PublicIdRequiredLayer() {
           公開IDを設定
         </h2>
         <p className="mt-2 text-sm text-gray-600">
-          公開するときのIDです（@の後ろ）。英数字と ._- のみ、5〜20文字。設定後は変更できません。
+          公開するときのIDです。英数字と ._- のみ、5〜20文字。設定後は変更できません。
         </p>
-        <div className="mt-3 flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm">
-          <span className="text-gray-500">@</span>
+        <div className="mt-3 flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm">
           <input
             value={draft}
             onChange={(e) =>
               setDraft(e.target.value.replace(/[\s\r\n]/g, ""))
             }
-            className="min-w-0 flex-1 bg-transparent outline-none"
+            className="min-w-0 flex-1 bg-transparent text-gray-900 outline-none placeholder:text-gray-400"
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}

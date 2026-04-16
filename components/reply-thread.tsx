@@ -36,6 +36,16 @@ export type PostReplyRow = {
   } | null;
 };
 
+function displayName(
+  nickname: string | null | undefined,
+  userId: string | null | undefined
+): string {
+  const nick = (nickname ?? "").trim();
+  if (nick) return nick;
+  const id = (userId ?? "").trim();
+  return id ? `user-${id.slice(0, 6)}` : "user";
+}
+
 function renderTextWithLinks(text: string) {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const isUrl = /^https?:\/\/[^\s]+$/;
@@ -102,6 +112,7 @@ function ReplyItem({
   onDelete,
   onReplyToReply,
 }: ItemProps) {
+  const name = displayName(reply.users?.nickname, reply.user_id);
   const [foldExpanded, setFoldExpanded] = useState(false);
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
@@ -139,23 +150,23 @@ function ReplyItem({
               className="flex min-w-0 items-center gap-1 font-medium text-gray-800 hover:text-blue-800"
             >
               <UserAvatar
-                name={reply.users?.nickname ?? null}
+                name={name}
                 avatarUrl={reply.users?.avatar_url ?? null}
                 placeholderHex={reply.users?.avatar_placeholder_hex ?? null}
               />
               <span className="truncate">
-                {reply.users?.nickname ?? "（未設定）"}
+                {name}
               </span>
             </Link>
             ) : (
             <span className="flex min-w-0 items-center gap-1 font-medium text-gray-800">
               <UserAvatar
-                name={reply.users?.nickname ?? null}
+                name={name}
                 avatarUrl={reply.users?.avatar_url ?? null}
                 placeholderHex={reply.users?.avatar_placeholder_hex ?? null}
               />
               <span className="truncate">
-                {reply.users?.nickname ?? "（未設定）"}
+                {name}
               </span>
             </span>
             )

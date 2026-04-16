@@ -156,6 +156,16 @@ function renderTextWithLinks(text: string) {
   });
 }
 
+function displayName(
+  nickname: string | null | undefined,
+  userId: string | null | undefined
+): string {
+  const nick = (nickname ?? "").trim();
+  if (nick) return nick;
+  const id = (userId ?? "").trim();
+  return id ? `user-${id.slice(0, 6)}` : "user";
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -1879,7 +1889,9 @@ export default function Home() {
               ) : (
                 <>
                 <ul className="space-y-3">
-                  {posts.map((post) => (
+                  {posts.map((post) => {
+                  const name = displayName(post.users?.nickname, post.user_id);
+                  return (
                 <li
                   key={post.id}
                   className="break-words rounded-lg border border-gray-200 bg-white p-4"
@@ -1893,41 +1905,41 @@ export default function Home() {
                           className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 hover:text-blue-800"
                         >
                           <UserAvatar
-                            name={post.users?.nickname ?? null}
+                            name={name}
                             avatarUrl={post.users?.avatar_url ?? null}
                             placeholderHex={
                               post.users?.avatar_placeholder_hex ?? null
                             }
                           />
                           <span className="line-clamp-2 min-w-0 flex-1 break-words underline decoration-blue-200 underline-offset-2">
-                            {post.users?.nickname ?? "（未設定）"}
+                            {name}
                           </span>
                         </Link>
                         ) : (
                         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800">
                           <UserAvatar
-                            name={post.users?.nickname ?? null}
+                            name={name}
                             avatarUrl={post.users?.avatar_url ?? null}
                             placeholderHex={
                               post.users?.avatar_placeholder_hex ?? null
                             }
                           />
                           <span className="line-clamp-2 min-w-0 flex-1 break-words">
-                            {post.users?.nickname ?? "（未設定）"}
+                            {name}
                           </span>
                         </div>
                         )
                       ) : (
                         <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800">
                           <UserAvatar
-                            name={post.users?.nickname ?? null}
+                            name={name}
                             avatarUrl={post.users?.avatar_url ?? null}
                             placeholderHex={
                               post.users?.avatar_placeholder_hex ?? null
                             }
                           />
                           <span className="line-clamp-2 min-w-0 flex-1 break-words">
-                            {post.users?.nickname ?? "（未設定）"}
+                            {name}
                           </span>
                         </div>
                       )}
@@ -2186,7 +2198,8 @@ export default function Home() {
                     </div>
                   ) : null}
                 </li>
-                  ))}
+                  );
+                })}
                 </ul>
                 <div ref={timelineLoadMoreSentinelRef} className="h-1 w-full" />
                 {timelineLoadingMore ? (
