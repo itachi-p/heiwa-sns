@@ -38,12 +38,12 @@ export type PostReplyRow = {
 
 function displayName(
   nickname: string | null | undefined,
-  userId: string | null | undefined
+  publicId: string | null | undefined
 ): string {
   const nick = (nickname ?? "").trim();
   if (nick) return nick;
-  const id = (userId ?? "").trim();
-  return id ? `user-${id.slice(0, 6)}` : "user";
+  const pid = (publicId ?? "").trim();
+  return pid || "（未設定）";
 }
 
 function renderTextWithLinks(text: string) {
@@ -112,7 +112,7 @@ function ReplyItem({
   onDelete,
   onReplyToReply,
 }: ItemProps) {
-  const name = displayName(reply.users?.nickname, reply.user_id);
+  const name = displayName(reply.users?.nickname, reply.users?.public_id);
   const [foldExpanded, setFoldExpanded] = useState(false);
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);

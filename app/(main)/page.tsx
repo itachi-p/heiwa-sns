@@ -158,12 +158,40 @@ function renderTextWithLinks(text: string) {
 
 function displayName(
   nickname: string | null | undefined,
-  userId: string | null | undefined
+  publicId: string | null | undefined
 ): string {
   const nick = (nickname ?? "").trim();
   if (nick) return nick;
-  const id = (userId ?? "").trim();
-  return id ? `user-${id.slice(0, 6)}` : "user";
+  const pid = (publicId ?? "").trim();
+  return pid || "（未設定）";
+}
+
+async function fetchPublicProfilesByIds(userIds: string[]) {
+  if (userIds.length === 0) return [] as Array<{
+    id: string;
+    nickname: string | null;
+    avatar_url?: string | null;
+    avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
+  }>;
+  const res = await fetch("/api/public-profiles", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userIds }),
+  });
+  if (!res.ok) return [];
+  const json = (await res.json().catch(() => null)) as
+    | {
+        profiles?: Array<{
+          id: string;
+          nickname: string | null;
+          avatar_url?: string | null;
+          avatar_placeholder_hex?: string | null;
+          public_id?: string | null;
+        }>;
+      }
+    | null;
+  return Array.isArray(json?.profiles) ? json.profiles : [];
 }
 
 export default function Home() {
@@ -512,24 +540,22 @@ export default function Home() {
       { data: affRows, error: affErr },
     ] = await Promise.all([profilePromise, relationPromise, affinityPromise]);
 
-    if (profileError) {
-      console.warn("users profile fetch skipped:", profileError.message);
-    } else {
-      for (const row of profiles ?? []) {
-        profileByUserId.set(row.id, {
-          nickname: row.nickname,
-          avatar_url: row.avatar_url ?? null,
-          avatar_placeholder_hex:
-            (row as { avatar_placeholder_hex?: string | null })
-              .avatar_placeholder_hex ?? null,
-          public_id:
-            typeof (row as { public_id?: string | null }).public_id === "string"
-              ? String(
-                  (row as { public_id?: string | null }).public_id
-                ).trim() || null
-              : null,
-        });
-      }
+    const fallbackProfiles =
+      profileError != null ? await fetchPublicProfilesByIds(authorIds) : [];
+    for (const row of (profileError ? fallbackProfiles : profiles ?? [])) {
+      profileByUserId.set(row.id, {
+        nickname: row.nickname,
+        avatar_url: row.avatar_url ?? null,
+        avatar_placeholder_hex:
+          (row as { avatar_placeholder_hex?: string | null })
+            .avatar_placeholder_hex ?? null,
+        public_id:
+          typeof (row as { public_id?: string | null }).public_id === "string"
+            ? String(
+                (row as { public_id?: string | null }).public_id
+              ).trim() || null
+            : null,
+      });
     }
 
     const merged: Post[] = list.map((p) => ({
@@ -641,25 +667,23 @@ export default function Home() {
           .from("users")
           .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
           .in("id", replyAuthorIds);
-        if (rpe) {
-          console.warn("reply users profile fetch skipped:", rpe.message);
-        } else {
-          for (const row of rprofiles ?? []) {
-            replyProfileByUserId.set(row.id, {
-              nickname: row.nickname,
-              avatar_url: row.avatar_url ?? null,
-              avatar_placeholder_hex:
-                (row as { avatar_placeholder_hex?: string | null })
-                  .avatar_placeholder_hex ?? null,
-              public_id:
-                typeof (row as { public_id?: string | null }).public_id ===
-                "string"
-                  ? String(
-                      (row as { public_id?: string | null }).public_id
-                    ).trim() || null
-                  : null,
-            });
-          }
+        const fallbackReplyProfiles =
+          rpe != null ? await fetchPublicProfilesByIds(replyAuthorIds) : [];
+        for (const row of (rpe ? fallbackReplyProfiles : rprofiles ?? [])) {
+          replyProfileByUserId.set(row.id, {
+            nickname: row.nickname,
+            avatar_url: row.avatar_url ?? null,
+            avatar_placeholder_hex:
+              (row as { avatar_placeholder_hex?: string | null })
+                .avatar_placeholder_hex ?? null,
+            public_id:
+              typeof (row as { public_id?: string | null }).public_id ===
+              "string"
+                ? String(
+                    (row as { public_id?: string | null }).public_id
+                  ).trim() || null
+                : null,
+          });
         }
       }
 
@@ -1890,7 +1914,10 @@ export default function Home() {
                 <>
                 <ul className="space-y-3">
                   {posts.map((post) => {
-                  const name = displayName(post.users?.nickname, post.user_id);
+                  const name = displayName(
+                    post.users?.nickname,
+                    post.users?.public_id
+                  );
                   return (
                 <li
                   key={post.id}
