@@ -7,7 +7,6 @@ import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import {
-  ReplyComposerModal,
   ReplyBubbleIcon,
 } from "@/components/reply-composer-modal";
 import { ReplyThread } from "@/components/reply-thread";
@@ -240,6 +239,9 @@ export default function HomePage() {
     () => new Set()
   );
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [likedReplyIds, setLikedReplyIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -1271,6 +1273,60 @@ export default function HomePage() {
       const next = new Set(prev);
       if (next.has(replyId)) next.delete(replyId);
       else next.add(replyId);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!userId) {
+      setLikedPostIds(new Set());
+      return;
+    }
+    const postIds = posts.map((p) => p.id);
+    if (postIds.length === 0) {
+      setLikedPostIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("likes")
+        .select("post_id")
+        .eq("user_id", userId)
+        .in("post_id", postIds);
+      if (cancelled || error) return;
+      setLikedPostIds(new Set((data ?? []).map((r) => Number(r.post_id))));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, posts]);
+
+  const handleLike = async (postId: number) => {
+    if (!userId) return;
+    const liked = likedPostIds.has(postId);
+    if (liked) {
+      const { error } = await supabase
+        .from("likes")
+        .delete()
+        .eq("user_id", userId)
+        .eq("post_id", postId);
+      if (error) return;
+      setLikedPostIds((prev) => {
+        const next = new Set(prev);
+        next.delete(postId);
+        return next;
+      });
+      return;
+    }
+    const { error } = await supabase.from("likes").upsert(
+      { user_id: userId, post_id: postId },
+      { onConflict: "user_id,post_id" }
+    );
+    if (error) return;
+    setLikedPostIds((prev) => {
+      const next = new Set(prev);
+      next.add(postId);
       return next;
     });
   };
@@ -2608,17 +2664,18 @@ export default function HomePage() {
                           if (!opened) {
                             toggleReplyPanel(post.id);
                             setInlineReplyPostId(post.id);
-                            return;
-                          }
-                          if (opened && canInteract && inlineReplyPostId === post.id) {
-                            if (!tryInteraction()) return;
-                            setReplyComposerPostId(post.id);
                             setReplyParentReplyId(null);
                             return;
                           }
                           setInlineReplyPostId(post.id);
+                          setReplyParentReplyId(null);
                         }}
-                        className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
+                        className={[
+                          "inline-flex items-center justify-center rounded-md border p-2 hover:opacity-90",
+                          (repliesByPost[post.id]?.length ?? 0) > 0
+                            ? "border-sky-300 bg-sky-100 text-sky-800"
+                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                        ].join(" ")}
                         aria-label="返信"
                         title="返信"
                       >
@@ -2630,47 +2687,31 @@ export default function HomePage() {
                           }
                         />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleLike(post.id)}
+                        className={[
+                          "inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors",
+                          likedPostIds.has(post.id)
+                            ? "border-pink-300 bg-pink-50 text-pink-700"
+                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                        ].join(" ")}
+                        aria-label="スキ"
+                        title="スキ"
+                      >
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                        </svg>
+                      </button>
                     </div>
                     {openedReplyPosts.has(post.id) ? (
                       <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
-                        {canInteract && inlineReplyPostId === post.id ? (
-                          <form
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              if (!tryInteraction()) return;
-                              setReplyParentReplyId(null);
-                              void handleReplySubmit(post.id);
-                            }}
-                            className="mb-3 flex items-end gap-2"
-                          >
-                            <AutosizeTextarea
-                              value={replyDrafts[post.id] ?? ""}
-                              onChange={(e) =>
-                                setReplyDrafts((prev) => ({
-                                  ...prev,
-                                  [post.id]: e.target.value,
-                                }))
-                              }
-                              placeholder={`${displayName(
-                                post.users?.nickname,
-                                post.users?.public_id
-                              )}（${post.users?.public_id ?? "ID未設定"}）に返信`}
-                              maxRows={4}
-                              maxLength={POST_AND_REPLY_MAX_CHARS}
-                              disabled={replySubmittingPostId === post.id}
-                              className="min-h-[2.25rem] min-w-0 flex-1 resize-none overflow-hidden rounded-full border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-                            />
-                            {(replyDrafts[post.id] ?? "").trim().length > 0 ? (
-                              <button
-                                type="submit"
-                                disabled={replySubmittingPostId === post.id}
-                                className="rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                              >
-                                投稿
-                              </button>
-                            ) : null}
-                          </form>
-                        ) : null}
                         {(() => {
                           const flat = repliesByPost[post.id] ?? [];
                           if (flat.length === 0) return null;
@@ -2711,15 +2752,8 @@ export default function HomePage() {
                                   : null
                               }
                               onReplyBubble={(r) => {
-                                const sameTarget =
-                                  inlineReplyPostId === post.id &&
-                                  replyParentReplyId === r.id;
                                 setInlineReplyPostId(post.id);
                                 setReplyParentReplyId(r.id);
-                                if (sameTarget && canInteract) {
-                                  if (!tryInteraction()) return;
-                                  setReplyComposerPostId(post.id);
-                                }
                               }}
                             />
                           );
@@ -2734,33 +2768,66 @@ export default function HomePage() {
         ) : null}
       </div>
 
-      {canInteract &&
-      replyComposerPostId != null &&
-      replyModalContext != null ? (
-        <ReplyComposerModal
-          open
-          onClose={() => {
-            if (replySubmittingPostId != null) return;
-            setReplyComposerPostId(null);
-            setReplyParentReplyId(null);
+      {canInteract && inlineReplyPostId != null ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!tryInteraction()) return;
+            void handleReplySubmit(inlineReplyPostId);
           }}
-          onSubmit={() => void handleReplySubmit(replyComposerPostId)}
-          submitting={replySubmittingPostId === replyComposerPostId}
-          draft={replyDrafts[replyComposerPostId] ?? ""}
-          onDraftChange={(v) =>
-            setReplyDrafts((prev) => ({
-              ...prev,
-              [replyComposerPostId]: v,
-            }))
-          }
-          targetNickname={replyModalContext.targetNickname}
-          targetAvatarUrl={replyModalContext.targetAvatarUrl}
-          targetPlaceholderHex={replyModalContext.targetPlaceholderHex}
-          targetPreview={replyModalContext.targetPreview}
-          viewerNickname={profileNickname}
-          viewerAvatarUrl={profileAvatarUrl}
-          viewerPlaceholderHex={profilePlaceholderHex}
-        />
+          className="fixed inset-x-2 bottom-16 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg"
+        >
+          <UserAvatar
+            name={profileNickname}
+            avatarUrl={profileAvatarUrl}
+            placeholderHex={profilePlaceholderHex}
+            size="sm"
+          />
+          <AutosizeTextarea
+            value={replyDrafts[inlineReplyPostId] ?? ""}
+            onChange={(e) =>
+              setReplyDrafts((prev) => ({
+                ...prev,
+                [inlineReplyPostId]: e.target.value,
+              }))
+            }
+            placeholder={(() => {
+              const post = posts.find((p) => p.id === inlineReplyPostId);
+              const targetReply =
+                replyParentReplyId != null
+                  ? (repliesByPost[inlineReplyPostId] ?? []).find(
+                      (r) => r.id === replyParentReplyId
+                    )
+                  : null;
+              const n = targetReply
+                ? displayName(
+                    targetReply.users?.nickname,
+                    targetReply.users?.public_id
+                  )
+                : displayName(post?.users?.nickname, post?.users?.public_id);
+              const pid =
+                targetReply?.users?.public_id ??
+                post?.users?.public_id ??
+                "ID未設定";
+              return `${n}（${pid}）に返信`;
+            })()}
+            maxRows={4}
+            maxLength={POST_AND_REPLY_MAX_CHARS}
+            disabled={replySubmittingPostId === inlineReplyPostId}
+            className="min-h-[2.2rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
+          />
+          {(replyDrafts[inlineReplyPostId] ?? "").trim().length > 0 ? (
+            <button
+              type="submit"
+              disabled={replySubmittingPostId === inlineReplyPostId}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              aria-label="送信"
+              title="送信"
+            >
+              ↑
+            </button>
+          ) : null}
+        </form>
       ) : null}
 
       <MustChangePasswordModal

@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { SiteHeader } from "@/components/site-header";
 import {
-  ReplyComposerModal,
   ReplyBubbleIcon,
 } from "@/components/reply-composer-modal";
 import { ReplyThread, type PostReplyRow } from "@/components/reply-thread";
@@ -86,9 +85,6 @@ export default function PublicProfilePage() {
   const [repliesByPost, setRepliesByPost] = useState<
     Record<number, PostReplyRow[]>
   >({});
-  const [replyComposerPostId, setReplyComposerPostId] = useState<number | null>(
-    null
-  );
   const [replyParentReplyId, setReplyParentReplyId] = useState<number | null>(
     null
   );
@@ -435,7 +431,6 @@ export default function PublicProfilePage() {
       }
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
       setReplyParentReplyId(null);
-      setReplyComposerPostId(null);
       await fetchRepliesForPost(postId);
     } finally {
       setReplySubmittingPostId(null);
@@ -629,14 +624,15 @@ export default function PublicProfilePage() {
                                 setReplyParentReplyId(null);
                                 return;
                               }
-                              if (opened && canInteract && inlineReplyPostId === post.id) {
-                                setReplyComposerPostId(post.id);
-                                return;
-                              }
                               setInlineReplyPostId(post.id);
                               setReplyParentReplyId(null);
                             }}
-                            className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
+                            className={[
+                              "inline-flex items-center justify-center rounded-md border p-2 hover:opacity-90",
+                              (repliesByPost[post.id]?.length ?? 0) > 0
+                                ? "border-sky-300 bg-sky-100 text-sky-800"
+                                : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
+                            ].join(" ")}
                             aria-label="返信"
                             title="返信"
                           >
@@ -712,19 +708,13 @@ export default function PublicProfilePage() {
                                   likedReplyIds={likedReplyIds}
                                   onToggleLikeReply={toggleReplyLikeLocal}
                                   activeReplyTargetId={
-                                    replyComposerPostId === post.id
+                                    inlineReplyPostId === post.id
                                       ? replyParentReplyId
                                       : null
                                   }
                                   onReplyBubble={(r) => {
-                                    const sameTarget =
-                                      inlineReplyPostId === post.id &&
-                                      replyParentReplyId === r.id;
                                     setInlineReplyPostId(post.id);
                                     setReplyParentReplyId(r.id);
-                                    if (sameTarget && canInteract) {
-                                      setReplyComposerPostId(post.id);
-                                    }
                                   }}
                                 />
                               );
@@ -740,30 +730,44 @@ export default function PublicProfilePage() {
           </>
         )}
       </div>
-      {canInteract && replyComposerPostId != null ? (
-        <ReplyComposerModal
-          open
-          onClose={() => {
-            if (replySubmittingPostId != null) return;
-            setReplyComposerPostId(null);
-            setReplyParentReplyId(null);
+      {canInteract && inlineReplyPostId != null ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleReplySubmit(inlineReplyPostId);
           }}
-          onSubmit={() => void handleReplySubmit(replyComposerPostId)}
-          submitting={replySubmittingPostId === replyComposerPostId}
-          draft={replyDrafts[replyComposerPostId] ?? ""}
-          onDraftChange={(v) =>
-            setReplyDrafts((prev) => ({ ...prev, [replyComposerPostId]: v }))
-          }
-          targetNickname={nickname}
-          targetAvatarUrl={avatarUrl}
-          targetPlaceholderHex={avatarPlaceholderHex}
-          targetPreview={
-            posts.find((p) => p.id === replyComposerPostId)?.content ?? ""
-          }
-          viewerNickname={viewerNickname}
-          viewerAvatarUrl={viewerAvatarUrl}
-          viewerPlaceholderHex={viewerPlaceholderHex}
-        />
+          className="fixed inset-x-2 bottom-16 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg"
+        >
+          <UserAvatar
+            name={viewerNickname}
+            avatarUrl={viewerAvatarUrl}
+            placeholderHex={viewerPlaceholderHex}
+            size="sm"
+          />
+          <textarea
+            rows={1}
+            value={replyDrafts[inlineReplyPostId] ?? ""}
+            onChange={(e) =>
+              setReplyDrafts((prev) => ({
+                ...prev,
+                [inlineReplyPostId]: e.target.value,
+              }))
+            }
+            placeholder={`${nickname ?? handle}（${handle}）に返信`}
+            className="min-h-[2.2rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+          />
+          {(replyDrafts[inlineReplyPostId] ?? "").trim().length > 0 ? (
+            <button
+              type="submit"
+              disabled={replySubmittingPostId === inlineReplyPostId}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              aria-label="送信"
+              title="送信"
+            >
+              ↑
+            </button>
+          ) : null}
+        </form>
       ) : null}
     </main>
     )

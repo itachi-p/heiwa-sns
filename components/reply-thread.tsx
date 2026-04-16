@@ -306,9 +306,9 @@ function ReplyItem({
           className={[
             "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
             bubbleActive
-              ? "border-sky-300 bg-sky-50 text-sky-700"
+              ? "border-sky-600 bg-sky-600 text-white"
               : hasChildren
-                ? "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100"
+                ? "border-sky-500 bg-sky-100 text-sky-800 hover:bg-sky-200"
                 : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50",
           ].join(" ")}
           aria-label="返信先にする"
