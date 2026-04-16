@@ -153,6 +153,16 @@ function renderTextWithLinks(text: string) {
   });
 }
 
+function displayName(
+  nickname: string | null | undefined,
+  publicId: string | null | undefined
+): string {
+  const nick = (nickname ?? "").trim();
+  if (nick) return nick;
+  const pid = (publicId ?? "").trim();
+  return pid || "（未設定）";
+}
+
 export default function HomePage() {
   const pathname = usePathname();
   const router = useRouter();
