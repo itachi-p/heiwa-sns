@@ -243,6 +243,9 @@ export default function Home() {
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
   );
+  const [likedReplyIds, setLikedReplyIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [moderationMode, setModerationMode] = useState<
     "mock" | "perspective"
   >("perspective");
@@ -253,6 +256,7 @@ export default function Home() {
     Record<number, PostReply[]>
   >({});
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [inlineReplyPostId, setInlineReplyPostId] = useState<number | null>(null);
   const [openedReplyPosts, setOpenedReplyPosts] = useState<Set<number>>(
     () => new Set()
   );
@@ -1347,6 +1351,15 @@ export default function Home() {
     await fetchPosts({ quiet: true });
   };
 
+  const toggleReplyLikeLocal = (replyId: number) => {
+    setLikedReplyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(replyId)) next.delete(replyId);
+      else next.add(replyId);
+      return next;
+    });
+  };
+
   const toggleReplyPanel = (postId: number) => {
     setOpenedReplyPosts((prev) => {
       const next = new Set(prev);
@@ -2186,32 +2199,75 @@ export default function Home() {
                       type="button"
                       onClick={() => {
                         const opened = openedReplyPosts.has(post.id);
-                        if (opened && canInteract) {
+                        if (!opened) {
+                          toggleReplyPanel(post.id);
+                          setInlineReplyPostId(post.id);
+                          return;
+                        }
+                        if (opened && canInteract && inlineReplyPostId === post.id) {
                           if (!tryInteraction()) return;
                           setReplyComposerPostId(post.id);
                           setReplyParentReplyId(null);
                           return;
                         }
-                        toggleReplyPanel(post.id);
+                        setInlineReplyPostId(post.id);
                       }}
                       className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
                       aria-label="返信"
                       title="返信"
                     >
-                      <ReplyBubbleIcon />
+                      <ReplyBubbleIcon
+                        className={
+                          (repliesByPost[post.id]?.length ?? 0) > 0
+                            ? "text-sky-700"
+                            : "text-gray-600"
+                        }
+                      />
                     </button>
                   </div>
                     {openedReplyPosts.has(post.id) ? (
                     <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
+                      {canInteract && inlineReplyPostId === post.id ? (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (!tryInteraction()) return;
+                            setReplyParentReplyId(null);
+                            void handleReplySubmit(post.id);
+                          }}
+                          className="mb-3 flex items-end gap-2"
+                        >
+                          <AutosizeTextarea
+                            value={replyDrafts[post.id] ?? ""}
+                            onChange={(e) =>
+                              setReplyDrafts((prev) => ({
+                                ...prev,
+                                [post.id]: e.target.value,
+                              }))
+                            }
+                            placeholder={`${displayName(
+                              post.users?.nickname,
+                              post.users?.public_id
+                            )}（${post.users?.public_id ?? "ID未設定"}）に返信`}
+                            maxRows={4}
+                            maxLength={POST_AND_REPLY_MAX_CHARS}
+                            disabled={replySubmittingPostId === post.id}
+                            className="min-h-[2.25rem] min-w-0 flex-1 resize-none overflow-hidden rounded-full border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
+                          />
+                          {(replyDrafts[post.id] ?? "").trim().length > 0 ? (
+                            <button
+                              type="submit"
+                              disabled={replySubmittingPostId === post.id}
+                              className="rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                            >
+                              投稿
+                            </button>
+                          ) : null}
+                        </form>
+                      ) : null}
                       {(() => {
                         const flat = repliesByPost[post.id] ?? [];
-                          if (flat.length === 0) {
-                            return (
-                              <p className="text-xs text-gray-500">
-                                返信はまだありません。
-                              </p>
-                            );
-                          }
+                          if (flat.length === 0) return null;
                         const { roots, childrenByParent } =
                           partitionRepliesByParent(flat);
                         return (
@@ -2239,6 +2295,24 @@ export default function Home() {
                             onCancelEdit={() => setEditingReplyId(null)}
                             onSaveEdit={(rid) => void handleSaveReplyEdit(rid)}
                             onDelete={handleDeleteReply}
+                              likedReplyIds={likedReplyIds}
+                              onToggleLikeReply={toggleReplyLikeLocal}
+                              activeReplyTargetId={
+                                replyComposerPostId === post.id
+                                  ? replyParentReplyId
+                                  : null
+                              }
+                              onReplyBubble={(r) => {
+                                const sameTarget =
+                                  inlineReplyPostId === post.id &&
+                                  replyParentReplyId === r.id;
+                                setInlineReplyPostId(post.id);
+                                setReplyParentReplyId(r.id);
+                                if (sameTarget && canInteract) {
+                                  if (!tryInteraction()) return;
+                                  setReplyComposerPostId(post.id);
+                                }
+                              }}
                           />
                         );
                       })()}

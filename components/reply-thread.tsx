@@ -3,6 +3,7 @@
 import Link from "next/link";
 import React, { useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
+import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { UserAvatar } from "@/components/user-avatar";
 import {
@@ -88,6 +89,10 @@ type ItemProps = {
   onCancelEdit: () => void;
   onSaveEdit: (replyId: number) => void;
   onDelete: (replyId: number) => void;
+  likedReplyIds: Set<number>;
+  onToggleLikeReply: (replyId: number) => void;
+  activeReplyTargetId: number | null;
+  onReplyBubble: (reply: PostReplyRow) => void;
 };
 
 function ReplyItem({
@@ -108,6 +113,10 @@ function ReplyItem({
   onCancelEdit,
   onSaveEdit,
   onDelete,
+  likedReplyIds,
+  onToggleLikeReply,
+  activeReplyTargetId,
+  onReplyBubble,
 }: ItemProps) {
   const name = displayName(reply.users?.nickname, reply.users?.public_id);
   const [foldExpanded, setFoldExpanded] = useState(false);
@@ -131,6 +140,9 @@ function ReplyItem({
       Object.keys(replyScores.first).length > 0) ||
     (replyScores?.second &&
       Object.keys(replyScores.second).length > 0);
+  const liked = likedReplyIds.has(reply.id);
+  const bubbleActive = activeReplyTargetId === reply.id;
+  const hasChildren = kids.length > 0;
   return (
     <li
       className={[
@@ -265,6 +277,46 @@ function ReplyItem({
           ) : null}
         </div>
       ) : null}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onToggleLikeReply(reply.id)}
+          className={[
+            "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
+            liked
+              ? "border-pink-300 bg-pink-50 text-pink-700"
+              : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50",
+          ].join(" ")}
+          aria-label="返信にスキ"
+          title="返信にスキ"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => onReplyBubble(reply)}
+          className={[
+            "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
+            bubbleActive
+              ? "border-sky-300 bg-sky-50 text-sky-700"
+              : hasChildren
+                ? "border-sky-200 bg-sky-50/70 text-sky-700 hover:bg-sky-100"
+                : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50",
+          ].join(" ")}
+          aria-label="返信先にする"
+          title="返信"
+        >
+          <ReplyBubbleIcon className="h-4 w-4" />
+        </button>
+      </div>
       {kids.length > 0 ? (
         <ul className="mt-2 space-y-2">
           {kids.map((c) => (
@@ -287,6 +339,10 @@ function ReplyItem({
               onCancelEdit={onCancelEdit}
               onSaveEdit={onSaveEdit}
               onDelete={onDelete}
+              likedReplyIds={likedReplyIds}
+              onToggleLikeReply={onToggleLikeReply}
+              activeReplyTargetId={activeReplyTargetId}
+              onReplyBubble={onReplyBubble}
             />
           ))}
         </ul>
@@ -315,6 +371,10 @@ type ThreadProps = {
   onCancelEdit: () => void;
   onSaveEdit: (replyId: number) => void;
   onDelete: (replyId: number) => void;
+  likedReplyIds: Set<number>;
+  onToggleLikeReply: (replyId: number) => void;
+  activeReplyTargetId: number | null;
+  onReplyBubble: (reply: PostReplyRow) => void;
 };
 
 export function ReplyThread(props: ThreadProps) {
@@ -340,6 +400,10 @@ export function ReplyThread(props: ThreadProps) {
           onCancelEdit={props.onCancelEdit}
           onSaveEdit={props.onSaveEdit}
           onDelete={props.onDelete}
+          likedReplyIds={props.likedReplyIds}
+          onToggleLikeReply={props.onToggleLikeReply}
+          activeReplyTargetId={props.activeReplyTargetId}
+          onReplyBubble={props.onReplyBubble}
         />
       ))}
     </ul>

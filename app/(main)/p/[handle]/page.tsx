@@ -89,10 +89,17 @@ export default function PublicProfilePage() {
   const [replyComposerPostId, setReplyComposerPostId] = useState<number | null>(
     null
   );
+  const [replyParentReplyId, setReplyParentReplyId] = useState<number | null>(
+    null
+  );
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [inlineReplyPostId, setInlineReplyPostId] = useState<number | null>(null);
   const [replySubmittingPostId, setReplySubmittingPostId] = useState<
     number | null
   >(null);
+  const [likedReplyIds, setLikedReplyIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const [replyScoresById, setReplyScoresById] = useState<
     Record<number, { first?: Record<string, number>; second?: Record<string, number> }>
   >({});
@@ -396,16 +403,27 @@ export default function PublicProfilePage() {
       const overallMax =
         typeof json.overallMax === "number" ? json.overallMax : 0;
 
+      const insertRow: {
+        post_id: number;
+        user_id: string;
+        content: string;
+        moderation_max_score: number;
+        moderation_dev_scores: { first: Record<string, number> } | null;
+        parent_reply_id?: number;
+      } = {
+        post_id: postId,
+        user_id: sessionId,
+        content,
+        moderation_max_score: overallMax,
+        moderation_dev_scores:
+          Object.keys(scores).length > 0 ? { first: scores } : null,
+      };
+      if (replyParentReplyId != null) {
+        insertRow.parent_reply_id = replyParentReplyId;
+      }
       const { data: inserted, error } = await supabase
         .from("post_replies")
-        .insert({
-          post_id: postId,
-          user_id: sessionId,
-          content,
-          moderation_max_score: overallMax,
-          moderation_dev_scores:
-            Object.keys(scores).length > 0 ? { first: scores } : null,
-        })
+        .insert(insertRow)
         .select("id")
         .single();
       if (error) return;
@@ -416,11 +434,21 @@ export default function PublicProfilePage() {
         }));
       }
       setReplyDrafts((prev) => ({ ...prev, [postId]: "" }));
+      setReplyParentReplyId(null);
       setReplyComposerPostId(null);
       await fetchRepliesForPost(postId);
     } finally {
       setReplySubmittingPostId(null);
     }
+  };
+
+  const toggleReplyLikeLocal = (replyId: number) => {
+    setLikedReplyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(replyId)) next.delete(replyId);
+      else next.add(replyId);
+      return next;
+    });
   };
 
   return (
@@ -595,30 +623,72 @@ export default function PublicProfilePage() {
                             type="button"
                             onClick={() => {
                               const opened = openedReplyPosts.has(post.id);
-                              if (opened && canInteract) {
+                              if (!opened) {
+                                toggleReplyPanel(post.id);
+                                setInlineReplyPostId(post.id);
+                                setReplyParentReplyId(null);
+                                return;
+                              }
+                              if (opened && canInteract && inlineReplyPostId === post.id) {
                                 setReplyComposerPostId(post.id);
                                 return;
                               }
-                              toggleReplyPanel(post.id);
+                              setInlineReplyPostId(post.id);
+                              setReplyParentReplyId(null);
                             }}
                             className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-700 hover:bg-gray-50"
                             aria-label="返信"
                             title="返信"
                           >
-                            <ReplyBubbleIcon />
+                            <ReplyBubbleIcon
+                              className={
+                                (repliesByPost[post.id]?.length ?? 0) > 0
+                                  ? "text-sky-700"
+                                  : "text-gray-600"
+                              }
+                            />
                           </button>
                         </div>
                         {openedReplyPosts.has(post.id) ? (
                           <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
+                            {canInteract && inlineReplyPostId === post.id ? (
+                              <form
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  void handleReplySubmit(post.id);
+                                }}
+                                className="mb-3 flex items-end gap-2"
+                              >
+                                <textarea
+                                  rows={1}
+                                  value={replyDrafts[post.id] ?? ""}
+                                  onChange={(e) =>
+                                    setReplyDrafts((prev) => ({
+                                      ...prev,
+                                      [post.id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    replyParentReplyId != null
+                                      ? `${nickname ?? handle}（${handle}）に返信`
+                                      : `${nickname ?? handle}（${handle}）に返信`
+                                  }
+                                  className="min-h-[2.25rem] min-w-0 flex-1 resize-none overflow-hidden rounded-full border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                                />
+                                {(replyDrafts[post.id] ?? "").trim().length > 0 ? (
+                                  <button
+                                    type="submit"
+                                    disabled={replySubmittingPostId === post.id}
+                                    className="rounded-full bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                                  >
+                                    投稿
+                                  </button>
+                                ) : null}
+                              </form>
+                            ) : null}
                             {(() => {
                               const flat = repliesByPost[post.id] ?? [];
-                              if (flat.length === 0) {
-                                return (
-                                  <p className="text-xs text-gray-500">
-                                    返信はまだありません。
-                                  </p>
-                                );
-                              }
+                              if (flat.length === 0) return null;
                               const { roots, childrenByParent } =
                                 partitionRepliesByParent(flat);
                               return (
@@ -639,6 +709,23 @@ export default function PublicProfilePage() {
                                   onCancelEdit={() => {}}
                                   onSaveEdit={() => {}}
                                   onDelete={() => {}}
+                                  likedReplyIds={likedReplyIds}
+                                  onToggleLikeReply={toggleReplyLikeLocal}
+                                  activeReplyTargetId={
+                                    replyComposerPostId === post.id
+                                      ? replyParentReplyId
+                                      : null
+                                  }
+                                  onReplyBubble={(r) => {
+                                    const sameTarget =
+                                      inlineReplyPostId === post.id &&
+                                      replyParentReplyId === r.id;
+                                    setInlineReplyPostId(post.id);
+                                    setReplyParentReplyId(r.id);
+                                    if (sameTarget && canInteract) {
+                                      setReplyComposerPostId(post.id);
+                                    }
+                                  }}
                                 />
                               );
                             })()}
@@ -659,6 +746,7 @@ export default function PublicProfilePage() {
           onClose={() => {
             if (replySubmittingPostId != null) return;
             setReplyComposerPostId(null);
+            setReplyParentReplyId(null);
           }}
           onSubmit={() => void handleReplySubmit(replyComposerPostId)}
           submitting={replySubmittingPostId === replyComposerPostId}

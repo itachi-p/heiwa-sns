@@ -170,14 +170,13 @@ export function MainBottomNav({
 
   if (!show) return null;
 
-  const profileHref = myPublicId ? `/@${myPublicId}` : "/home";
+  const profileHref = myPublicId ? `/@${myPublicId}` : "/";
   const isTimeline = pathname === "/";
   const isActivity =
     pathname === "/home/activity" || pathname.startsWith("/home/activity");
   const onOwnProfile =
     myPublicId != null && pathname === `/@${myPublicId}`;
-  const isProfile =
-    pathname === "/home" || onOwnProfile;
+  const isProfile = onOwnProfile;
 
   const navBtn =
     "relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[10px] font-medium text-gray-600 min-h-[52px] max-w-[20%]";
