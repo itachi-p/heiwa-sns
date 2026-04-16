@@ -229,8 +229,17 @@ export function SiteHeader({
       <header className="sticky top-0 z-50 border-b border-gray-200/90 bg-white/95 backdrop-blur">
         <div className="mx-auto w-full max-w-xl px-3 py-2 sm:max-w-3xl sm:px-4 lg:max-w-6xl">
           <div className="flex w-full min-w-0 items-center gap-2">
-            <h1 className="shrink-0 text-base font-semibold tracking-tight text-gray-900 sm:text-lg">
-              Nagi
+            <h1 className="shrink-0">
+              <span className="inline-flex items-center gap-1.5 text-base font-semibold tracking-tight text-gray-900 sm:gap-2 sm:text-lg">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/icon-192x192.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="h-6 w-6 rounded-md object-cover sm:h-7 sm:w-7"
+                />
+                <span>Nagi</span>
+              </span>
             </h1>
             <div className="min-w-0 flex-1" aria-hidden="true" />
             {!authReady ? (
