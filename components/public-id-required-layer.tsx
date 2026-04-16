@@ -115,7 +115,7 @@ export function PublicIdRequiredLayer() {
           公開IDを設定
         </h2>
         <p className="mt-2 text-sm text-gray-600">
-          公開するときのIDです。英数字と ._- のみ、5〜20文字。設定後は変更できません。
+          IDを設定してください。英数字と記号(._-)のみ5〜20文字で設定後は変更できません。
         </p>
         <div className="mt-3 flex items-center rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm">
           <input
