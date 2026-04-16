@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import React, { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
@@ -64,7 +63,6 @@ export default function PublicProfilePage() {
   const [posts, setPosts] = useState<Post[]>([]);
 
   const sessionId = sessionUser?.id ?? null;
-  const isOwn = Boolean(sessionId && targetId && sessionId === targetId);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -207,20 +205,6 @@ export default function PublicProfilePage() {
             {errorMessage ? (
               <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                 {errorMessage}
-              </div>
-            ) : null}
-
-            {isOwn ? (
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Link
-                  href="/home"
-                  className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700"
-                >
-                  プロフィール・投稿を編集
-                </Link>
-                <span className="text-xs text-gray-500">
-                  表示はこのページ、編集はマイページ（従来のホーム）から行えます。
-                </span>
               </div>
             ) : null}
 

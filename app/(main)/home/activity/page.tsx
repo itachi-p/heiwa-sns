@@ -47,6 +47,7 @@ type ActivityRow = {
     nickname: string | null;
     avatar_url?: string | null;
     avatar_placeholder_hex?: string | null;
+    public_id?: string | null;
   } | null;
 };
 
@@ -205,12 +206,17 @@ export default function HomeActivityPage() {
     ];
     const profileMap = new Map<
       string,
-      { nickname: string | null; avatar_url?: string | null; avatar_placeholder_hex?: string | null }
+      {
+        nickname: string | null;
+        avatar_url?: string | null;
+        avatar_placeholder_hex?: string | null;
+        public_id?: string | null;
+      }
     >();
     if (authorIds.length > 0) {
       const { data: profiles, error: pErr } = await supabase
         .from("users")
-        .select("id, nickname, avatar_url, avatar_placeholder_hex")
+        .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
         .in("id", authorIds);
       if (pErr) {
         setErrorMessage(pErr.message);
@@ -224,6 +230,10 @@ export default function HomeActivityPage() {
           avatar_placeholder_hex:
             (p as { avatar_placeholder_hex?: string | null }).avatar_placeholder_hex ??
             null,
+          public_id:
+            typeof (p as { public_id?: string | null }).public_id === "string"
+              ? String((p as { public_id?: string | null }).public_id).trim() || null
+              : null,
         });
       }
     }
@@ -346,14 +356,32 @@ export default function HomeActivityPage() {
                     >
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
                         <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <UserAvatar
-                            name={row.users?.nickname ?? null}
-                            avatarUrl={row.users?.avatar_url ?? null}
-                            placeholderHex={row.users?.avatar_placeholder_hex ?? null}
-                          />
-                          <span className="font-medium text-gray-800">
-                            {row.users?.nickname ?? "（未設定）"}
-                          </span>
+                          {row.users?.public_id ? (
+                            <Link
+                              href={`/@${row.users.public_id}`}
+                              className="inline-flex min-w-0 items-center gap-2 font-medium text-gray-800 hover:text-blue-800"
+                            >
+                              <UserAvatar
+                                name={row.users?.nickname ?? null}
+                                avatarUrl={row.users?.avatar_url ?? null}
+                                placeholderHex={row.users?.avatar_placeholder_hex ?? null}
+                              />
+                              <span className="truncate">
+                                {row.users?.nickname ?? `@${row.users.public_id}`}
+                              </span>
+                            </Link>
+                          ) : (
+                            <>
+                              <UserAvatar
+                                name={row.users?.nickname ?? null}
+                                avatarUrl={row.users?.avatar_url ?? null}
+                                placeholderHex={row.users?.avatar_placeholder_hex ?? null}
+                              />
+                              <span className="font-medium text-gray-800">
+                                {row.users?.nickname ?? "（未設定）"}
+                              </span>
+                            </>
+                          )}
                           <span className="shrink-0">が返信</span>
                         </div>
                         <time
