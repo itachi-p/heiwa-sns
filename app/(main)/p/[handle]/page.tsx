@@ -8,6 +8,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import type { InterestPick } from "@/lib/interests";
 import { getPostImagePublicUrl } from "@/lib/post-image-storage";
+import HomePage from "@/app/(main)/home/page";
 
 const supabase = createClient();
 
@@ -47,6 +48,11 @@ export default function PublicProfilePage() {
 
   const [authReady, setAuthReady] = useState(false);
   const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [viewerNickname, setViewerNickname] = useState<string | null>(null);
+  const [viewerAvatarUrl, setViewerAvatarUrl] = useState<string | null>(null);
+  const [viewerPlaceholderHex, setViewerPlaceholderHex] = useState<string | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -63,6 +69,7 @@ export default function PublicProfilePage() {
   const [posts, setPosts] = useState<Post[]>([]);
 
   const sessionId = sessionUser?.id ?? null;
+  const isOwn = Boolean(sessionId && targetId && sessionId === targetId);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -76,6 +83,33 @@ export default function PublicProfilePage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!sessionUser?.id) {
+      setViewerNickname(null);
+      setViewerAvatarUrl(null);
+      setViewerPlaceholderHex(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from("users")
+        .select("nickname, avatar_url, avatar_placeholder_hex")
+        .eq("id", sessionUser.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setViewerNickname(data?.nickname ?? null);
+      setViewerAvatarUrl(data?.avatar_url ?? null);
+      setViewerPlaceholderHex(
+        (data as { avatar_placeholder_hex?: string | null } | null)
+          ?.avatar_placeholder_hex ?? null
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUser?.id]);
 
   useEffect(() => {
     if (!handle) {
@@ -177,17 +211,16 @@ export default function PublicProfilePage() {
   }, [handle]);
 
   return (
+    isOwn ? (
+      <HomePage />
+    ) : (
     <main className="min-h-screen bg-sky-50 text-gray-900">
       <SiteHeader
         authReady={authReady}
         user={sessionUser}
-        profileNickname={
-          sessionId === targetId ? nickname : sessionUser?.email ?? null
-        }
-        profileAvatarUrl={sessionId === targetId ? avatarUrl : null}
-        avatarPlaceholderHex={
-          sessionId === targetId ? avatarPlaceholderHex : null
-        }
+        profileNickname={viewerNickname}
+        profileAvatarUrl={viewerAvatarUrl}
+        avatarPlaceholderHex={viewerPlaceholderHex}
         onSignOut={async () => {
           await supabase.auth.signOut();
         }}
@@ -312,5 +345,6 @@ export default function PublicProfilePage() {
         )}
       </div>
     </main>
+    )
   );
 }
