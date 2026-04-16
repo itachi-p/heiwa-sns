@@ -421,15 +421,14 @@ export default function Home() {
       setTimelineOffset(0);
     }
     try {
-    if (userId) {
-      try {
-        await fetch("/api/finalize-my-pending", {
-          method: "POST",
-          credentials: "same-origin",
-        });
-      } catch {
+    if (userId && !append) {
+      // 表示を優先し、重い確定処理はバックグラウンドで走らせる。
+      void fetch("/api/finalize-my-pending", {
+        method: "POST",
+        credentials: "same-origin",
+      }).catch(() => {
         /* 確定 API が失敗しても一覧取得は続行 */
-      }
+      });
     }
     const start = append ? timelineOffset : 0;
     const end = start + TIMELINE_PAGE_SIZE - 1;
@@ -470,16 +469,42 @@ export default function Home() {
         public_id: string | null;
       }
     >();
-    if (authorIds.length > 0) {
-      const { data: profiles, error: profileError } = await supabase
-        .from("users")
-        .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
-        .in("id", authorIds);
+    const profilePromise = authorIds.length > 0
+      ? supabase
+          .from("users")
+          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
+          .in("id", authorIds)
+      : Promise.resolve({ data: null, error: null });
 
-      if (profileError) {
-        setErrorMessage(profileError.message);
-        return;
-      }
+    const relationPromise = userId
+      ? (() => {
+          const since = new Date(
+            Date.now() - RELATION_PENALTY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+          ).toISOString();
+          return supabase
+            .from("reply_toxic_events")
+            .select("actor_user_id, max_score")
+            .eq("target_user_id", userId)
+            .gte("created_at", since);
+        })()
+      : Promise.resolve({ data: null, error: null });
+
+    const affinityPromise = userId
+      ? supabase
+          .from("user_affinity")
+          .select("to_user_id, like_score")
+          .eq("from_user_id", userId)
+      : Promise.resolve({ data: null, error: null });
+
+    const [
+      { data: profiles, error: profileError },
+      { data: evRows, error: evErr },
+      { data: affRows, error: affErr },
+    ] = await Promise.all([profilePromise, relationPromise, affinityPromise]);
+
+    if (profileError) {
+      console.warn("users profile fetch skipped:", profileError.message);
+    } else {
       for (const row of profiles ?? []) {
         profileByUserId.set(row.id, {
           nickname: row.nickname,
@@ -516,41 +541,25 @@ export default function Home() {
     }));
 
     const relationMultiplierByAuthor = new Map<string, number>();
-    if (userId) {
-      const since = new Date(
-        Date.now() - RELATION_PENALTY_WINDOW_DAYS * 24 * 60 * 60 * 1000
-      ).toISOString();
-      const { data: evRows, error: evErr } = await supabase
-        .from("reply_toxic_events")
-        .select("actor_user_id, max_score")
-        .eq("target_user_id", userId)
-        .gte("created_at", since);
-      if (!evErr) {
-        for (const row of evRows ?? []) {
-          const actor = row.actor_user_id as string;
-          const m = Math.max(0.5, Math.min(0.8, 1 - Number(row.max_score ?? 0)));
-          relationMultiplierByAuthor.set(
-            actor,
-            Math.min(relationMultiplierByAuthor.get(actor) ?? 1, m)
-          );
-        }
+    if (userId && !evErr) {
+      for (const row of evRows ?? []) {
+        const actor = row.actor_user_id as string;
+        const m = Math.max(0.5, Math.min(0.8, 1 - Number(row.max_score ?? 0)));
+        relationMultiplierByAuthor.set(
+          actor,
+          Math.min(relationMultiplierByAuthor.get(actor) ?? 1, m)
+        );
       }
     }
 
     const affinityLikeScoreByAuthor = new Map<string, number>();
-    if (userId) {
-      const { data: affRows, error: affErr } = await supabase
-        .from("user_affinity")
-        .select("to_user_id, like_score")
-        .eq("from_user_id", userId);
-      if (!affErr) {
-        for (const row of affRows ?? []) {
-          const toId = row.to_user_id as string;
-          affinityLikeScoreByAuthor.set(
-            toId,
-            typeof row.like_score === "number" ? row.like_score : 0
-          );
-        }
+    if (userId && !affErr) {
+      for (const row of affRows ?? []) {
+        const toId = row.to_user_id as string;
+        affinityLikeScoreByAuthor.set(
+          toId,
+          typeof row.like_score === "number" ? row.like_score : 0
+        );
       }
     }
 
@@ -623,24 +632,24 @@ export default function Home() {
           .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
           .in("id", replyAuthorIds);
         if (rpe) {
-          setErrorMessage(rpe.message);
-          return;
-        }
-        for (const row of rprofiles ?? []) {
-          replyProfileByUserId.set(row.id, {
-            nickname: row.nickname,
-            avatar_url: row.avatar_url ?? null,
-            avatar_placeholder_hex:
-              (row as { avatar_placeholder_hex?: string | null })
-                .avatar_placeholder_hex ?? null,
-            public_id:
-              typeof (row as { public_id?: string | null }).public_id ===
-              "string"
-                ? String(
-                    (row as { public_id?: string | null }).public_id
-                  ).trim() || null
-                : null,
-          });
+          console.warn("reply users profile fetch skipped:", rpe.message);
+        } else {
+          for (const row of rprofiles ?? []) {
+            replyProfileByUserId.set(row.id, {
+              nickname: row.nickname,
+              avatar_url: row.avatar_url ?? null,
+              avatar_placeholder_hex:
+                (row as { avatar_placeholder_hex?: string | null })
+                  .avatar_placeholder_hex ?? null,
+              public_id:
+                typeof (row as { public_id?: string | null }).public_id ===
+                "string"
+                  ? String(
+                      (row as { public_id?: string | null }).public_id
+                    ).trim() || null
+                  : null,
+            });
+          }
         }
       }
 
