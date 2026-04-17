@@ -1373,15 +1373,6 @@ export default function Home() {
     await fetchPosts({ quiet: true });
   };
 
-  const toggleReplyLikeLocal = (replyId: number) => {
-    setLikedReplyIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(replyId)) next.delete(replyId);
-      else next.add(replyId);
-      return next;
-    });
-  };
-
   const toggleReplyPanel = (postId: number) => {
     setOpenedReplyPosts((prev) => {
       const next = new Set(prev);

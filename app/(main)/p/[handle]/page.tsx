@@ -450,13 +450,19 @@ export default function PublicProfilePage() {
    * 他者プロフィール画面では返信の編集/削除/下書き変更は不可（自分でないため）。
    * ReplyThread の型に合わせて no-op の安定参照を 1 回作り、memo を効かせる。
    */
-  const stableNoopDraftChange = useCallback((_v: string) => {}, []);
+  const stableNoopDraftChange = useCallback((_v: string): void => {
+    void _v;
+  }, []);
   const stableNoopStartEdit = useCallback(
-    (_r: { id: number; content: string; pending_content?: string | null }) => {},
+    (_r: { id: number; content: string; pending_content?: string | null }): void => {
+      void _r;
+    },
     []
   );
-  const stableNoop = useCallback(() => {}, []);
-  const stableNoopSaveOrDelete = useCallback((_id: number) => {}, []);
+  const stableNoop = useCallback((): void => {}, []);
+  const stableNoopSaveOrDelete = useCallback((_id: number): void => {
+    void _id;
+  }, []);
   const stableOnReplyBubble = useCallback(
     (r: { id: number; post_id: number }) => {
       setInlineReplyPostId(r.post_id);
