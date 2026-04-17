@@ -16,7 +16,7 @@ import { getPostImagePublicUrl } from "@/lib/post-image-storage";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
-import HomePage from "@/app/(main)/home/page";
+import HomePage from "@/components/home/home-page";
 
 const supabase = createClient();
 

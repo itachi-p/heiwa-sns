@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { EditCountdownBadge } from "@/components/edit-countdown-badge";
@@ -163,8 +162,6 @@ function displayName(
 }
 
 export default function HomePage() {
-  const pathname = usePathname();
-  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
@@ -1448,31 +1445,6 @@ export default function HomePage() {
     }
     return true;
   };
-
-  useEffect(() => {
-    if (pathname !== "/home") return;
-    if (!authReady || !profileReady || !userId) return;
-    if (!profilePublicId) return;
-    router.replace(`/@${profilePublicId}`);
-  }, [pathname, authReady, profileReady, userId, profilePublicId, router]);
-
-  if (pathname === "/home") {
-    return (
-      <main className="min-h-screen bg-sky-50 text-gray-900">
-        <SiteHeader
-          authReady={authReady}
-          user={user}
-          profileNickname={profileNickname}
-          profileAvatarUrl={profileAvatarUrl}
-          avatarPlaceholderHex={profilePlaceholderHex}
-          onSignOut={signOut}
-        />
-        <div className="mx-auto max-w-xl p-4 sm:p-6">
-          <p className="text-sm text-gray-500">プロフィールへ移動中…</p>
-        </div>
-      </main>
-    );
-  }
 
   const replyModalContext = useMemo(() => {
     // expiryTick を deps に含めることで、編集窓が切れた瞬間に

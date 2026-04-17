@@ -218,11 +218,7 @@ export function MainBottomNav({
           aria-label="投稿を書く"
           title="投稿"
           onClick={() => {
-            if (
-              pathname !== "/" &&
-              pathname !== "/home" &&
-              !onOwnProfile
-            ) {
+            if (pathname !== "/" && !onOwnProfile) {
               router.push("/");
               window.setTimeout(() => requestOpenCompose(), 80);
             } else {

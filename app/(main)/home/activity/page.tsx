@@ -98,9 +98,8 @@ export default function HomeActivityPage() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
-  // 返信一覧から元投稿へ遷移する際、`/home` 経由だと `/@{publicId}` への
-  // リダイレクト時に ?post=X が欠落してスクロール先にたどり着けないため、
-  // 自分の public_id を保持して `/@{publicId}?post=X` に直接リンクする。
+  // 返信一覧から元投稿にスクロール遷移するための自分の public_id。
+  // /@{publicId}?post=X で直接 HomePage に飛ばしてスクロールを効かせる。
   const [viewerPublicId, setViewerPublicId] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -403,7 +402,7 @@ export default function HomeActivityPage() {
                         href={
                           viewerPublicId
                             ? `/@${viewerPublicId}?post=${row.post_id}`
-                            : `/home?post=${row.post_id}`
+                            : "/"
                         }
                         className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"
                       >
