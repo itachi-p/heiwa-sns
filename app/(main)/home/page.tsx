@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
-import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
+import { ComposeModal } from "@/components/home/compose-modal";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import {
   ReplyBubbleIcon,
@@ -60,7 +60,6 @@ import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
 import {
   getPostImagePublicUrl,
-  preparePostImageForUpload,
   removePostImageIfAny,
   uploadPostImage,
   type PreparedPostImage,
@@ -227,15 +226,6 @@ export default function HomePage() {
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [composeFormError, setComposeFormError] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [composePostImage, setComposePostImage] =
-    useState<PreparedPostImage | null>(null);
-  const [composeImagePreviewUrl, setComposeImagePreviewUrl] = useState<
-    string | null
-  >(null);
-  const composeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
     "perspective"
   );
@@ -306,26 +296,6 @@ export default function HomePage() {
     window.addEventListener(COMPOSE_OPEN_EVENT, open);
     return () => window.removeEventListener(COMPOSE_OPEN_EVENT, open);
   }, []);
-
-  useEffect(() => {
-    if (!composeOpen) return;
-    const id = window.requestAnimationFrame(() => {
-      composeTextareaRef.current?.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [composeOpen]);
-
-  useEffect(() => {
-    if (!composePostImage) {
-      setComposeImagePreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(composePostImage.blob);
-    setComposeImagePreviewUrl(url);
-    return () => {
-      URL.revokeObjectURL(url);
-    };
-  }, [composePostImage]);
 
   useEffect(() => {
     if (!scoresPersistenceEnabled) return;
@@ -1541,31 +1511,23 @@ export default function HomePage() {
     }
   }, [replyComposerPostId, replyModalContext]);
 
-  const handleSubmitPost = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!userId) return;
-    if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
-    const textContent = draft.trim();
-    if (!textContent && !composePostImage) {
-      setComposeFormError("投稿内容を入力してください。");
-      setToast({ message: "投稿内容を入力してください。", tone: "error" });
-      return;
+  /**
+   * 投稿送信ハンドラ。子の `ComposeModal` から本文と画像を受け取る。
+   *
+   * 返り値:
+   *  - `true` : 投稿が正常終了。子側で下書き / 画像 state をリセットする。
+   *  - `false`: モデレーション失敗 / DB / 画像アップロード失敗など。子側では下書きを保持する。
+   *
+   * 既存仕様互換のため、文字数や空投稿などの検証は子側で済ませてから呼ぶ前提。
+   */
+  const handleSubmitPost = async (
+    textContent: string,
+    composePostImage: PreparedPostImage | null
+  ): Promise<boolean> => {
+    if (!userId) return false;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding) {
+      return false;
     }
-    if (!textContent && composePostImage) {
-      const msg = "画像を添付する場合は本文を入力してください。";
-      setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
-      return;
-    }
-    if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
-      const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
-      setComposeFormError(msg);
-      setToast({ message: msg, tone: "error" });
-      return;
-    }
-
-    setSubmitting(true);
-    setComposeFormError(null);
 
     let postOverallMax = 0;
     let postScores: Record<string, number> = {};
@@ -1591,9 +1553,8 @@ export default function HomePage() {
         | null;
       if (!moderationRes.ok) {
         const msg = moderationJson?.error ?? "AI判定に失敗しました。";
-        setComposeFormError(msg);
-        setSubmitting(false);
-        return;
+        setToast({ message: msg, tone: "error" });
+        return false;
       }
 
       postScores = normalizePerspectiveScores(
@@ -1618,11 +1579,12 @@ export default function HomePage() {
     }
     const sessionUser = sessionWrap.session?.user;
     if (!sessionUser?.id) {
-      setComposeFormError(
-        "ログインの有効期限が切れている可能性があります。ログインし直してからお試しください。"
-      );
-      setSubmitting(false);
-      return;
+      setToast({
+        message:
+          "ログインの有効期限が切れている可能性があります。ログインし直してからお試しください。",
+        tone: "error",
+      });
+      return false;
     }
     const authorId = sessionUser.id;
     if (authorId !== userId) {
@@ -1644,14 +1606,15 @@ export default function HomePage() {
       .single();
 
     if (error) {
-      setComposeFormError(friendlyClientDbMessage(error.message));
-      setSubmitting(false);
-      return;
+      setToast({
+        message: friendlyClientDbMessage(error.message),
+        tone: "error",
+      });
+      return false;
     }
 
     if (!inserted) {
-      setSubmitting(false);
-      return;
+      return false;
     }
 
     if (composePostImage) {
@@ -1663,9 +1626,8 @@ export default function HomePage() {
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", inserted.id);
-        setComposeFormError(up.message);
-        setSubmitting(false);
-        return;
+        setToast({ message: up.message, tone: "error" });
+        return false;
       }
       const { error: updErr } = await supabase
         .from("posts")
@@ -1675,10 +1637,11 @@ export default function HomePage() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", inserted.id);
-        const msg = friendlyClientDbMessage(updErr.message);
-        setComposeFormError(msg);
-        setSubmitting(false);
-        return;
+        setToast({
+          message: friendlyClientDbMessage(updErr.message),
+          tone: "error",
+        });
+        return false;
       }
     }
 
@@ -1690,9 +1653,6 @@ export default function HomePage() {
       }));
     }
 
-    setComposeFormError(null);
-    setDraft("");
-    setComposePostImage(null);
     setComposeOpen(false);
     if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
       setToast({
@@ -1701,7 +1661,7 @@ export default function HomePage() {
       });
     }
     await fetchOwnPosts(authorId);
-    setSubmitting(false);
+    return true;
   };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2497,89 +2457,15 @@ export default function HomePage() {
         !needsInviteOnboarding ? (
           <section>
             <div className="mb-4 border-t border-gray-200" role="separator" />
-            {composeOpen ? (
-              <div className="touch-manipulation fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
-                <form
-                  onSubmit={handleSubmitPost}
-                  className="touch-manipulation mb-4 flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg"
-                >
-                <div className="flex items-end gap-2">
-                  <AutosizeTextarea
-                    ref={composeTextareaRef}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    placeholder="いまどうしてる？"
-                    maxRows={12}
-                    maxLength={POST_AND_REPLY_MAX_CHARS}
-                    disabled={submitting}
-                    autoComplete="off"
-                    enterKeyHint="send"
-                    className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-                  />
-                  <ImageAttachIconButton
-                    disabled={submitting}
-                    onPick={(file) => {
-                      void (async () => {
-                        const r = await preparePostImageForUpload(file);
-                        if (!r.ok) {
-                          setComposeFormError(r.message);
-                          return;
-                        }
-                        setComposeFormError(null);
-                        setComposePostImage({
-                          blob: r.blob,
-                          contentType: r.contentType,
-                          ext: r.ext,
-                        });
-                      })();
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  {composeImagePreviewUrl ? (
-                    <div className="flex flex-wrap items-end gap-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={composeImagePreviewUrl}
-                        alt=""
-                        className="max-h-40 rounded border border-gray-200 object-contain"
-                      />
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={() => setComposePostImage(null)}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        画像を外す
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {submitting ? "投稿中..." : "投稿"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => {
-                      setComposeOpen(false);
-                      setComposeFormError(null);
-                      setDraft("");
-                      setComposePostImage(null);
-                    }}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    キャンセル
-                  </button>
-                </div>
-                </form>
-              </div>
-            ) : null}
+            <ComposeModal
+              open={composeOpen}
+              maxChars={POST_AND_REPLY_MAX_CHARS}
+              onSubmit={handleSubmitPost}
+              onValidationError={(msg) =>
+                setToast({ message: msg, tone: "error" })
+              }
+              onCancel={() => setComposeOpen(false)}
+            />
 
             {posts.length === 0 ? (
               <p className="text-sm text-gray-500">まだあなたの投稿はありません。</p>
