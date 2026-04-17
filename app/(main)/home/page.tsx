@@ -239,9 +239,7 @@ export default function HomePage() {
   const [editReplyDraft, setEditReplyDraft] = useState("");
   const [replyEditSaving, setReplyEditSaving] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [moderationMode, setModerationMode] = useState<"mock" | "perspective">(
-    "perspective"
-  );
+  const [moderationMode] = useState<"mock" | "perspective">("perspective");
   const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
     string | null
   >(null);

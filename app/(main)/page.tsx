@@ -24,7 +24,6 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { createClient } from "@/lib/supabase/client";
-import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
 import {
@@ -45,7 +44,6 @@ import {
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
-import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import {
   canEditOwnPost,
@@ -248,9 +246,7 @@ export default function Home() {
   const [likedReplyIds, setLikedReplyIds] = useState<Set<number>>(
     () => new Set()
   );
-  const [moderationMode, setModerationMode] = useState<
-    "mock" | "perspective"
-  >("perspective");
+  const [moderationMode] = useState<"mock" | "perspective">("perspective");
   const [moderationDegradedMessage, setModerationDegradedMessage] = useState<
     string | null
   >(null);
