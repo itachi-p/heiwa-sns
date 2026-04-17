@@ -1,8 +1,0 @@
----
-description: テストユーザ 01〜の役割（手動 / E2E / 招待貸与の境界）
-alwaysApply: true
----
-
-# テストユーザ番号
-
-E2E・`e2e/reset-lent-invite-user`・`.env.local` の貸与メール・招待トークン運用を変える提案をする前に **`docs/dev/TEST_USER_ROLES.md`** を読む。文書と違う割り当てを実装する場合は **ユーザーに方針確認**（「先日の役割分担と違いますが意図ですか？」）を一度挟む。
