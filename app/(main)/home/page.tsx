@@ -266,6 +266,22 @@ export default function HomePage() {
   const replyScoresByIdRef = useRef(replyScoresById);
   const secondModerationBusyRef = useRef<Set<string>>(new Set());
   const loadedHomeUserIdRef = useRef<string | null>(null);
+  /**
+   * 自分のポスト一覧に付与する `users` メタ情報のキャッシュ。
+   * ポーリングの軽量リロード時、毎回 users テーブルを問い合わせずにこの値を再利用する。
+   * 初回ロード（fetchOwnPosts フル版）とプロフィール更新時にのみ更新される。
+   */
+  const ownerUsersMetaRef = useRef<{
+    nickname: string | null;
+    avatar_url: string | null;
+    avatar_placeholder_hex: string | null;
+    public_id: string | null;
+  }>({
+    nickname: null,
+    avatar_url: null,
+    avatar_placeholder_hex: null,
+    public_id: null,
+  });
   postScoresByIdRef.current = postScoresById;
   replyScoresByIdRef.current = replyScoresById;
 
@@ -371,7 +387,12 @@ export default function HomePage() {
     if (error) console.warn("ensurePublicUserRow:", error.message);
   }
 
-  const fetchOwnPosts = async (uid: string) => {
+  /**
+   * ポスト+返信のみを再取得する軽量リロード。
+   * プロフィール/趣味/閾値設定は問い合わせず、`ownerUsersMetaRef` の値を再利用する。
+   * 30秒ポーリングや pending 確定検知からの再取得で、無駄な通信を避けるために使う。
+   */
+  const reloadPostsAndReplies = async (uid: string): Promise<void> => {
     const stillThisViewer = () => homeSessionUserIdRef.current === uid;
     try {
       await fetch("/api/finalize-my-pending", {
@@ -386,11 +407,122 @@ export default function HomePage() {
       .select("*")
       .eq("user_id", uid)
       .order("created_at", { ascending: false });
-
     if (error) {
       if (stillThisViewer()) setErrorMessage(error.message);
       return;
     }
+    if (!stillThisViewer()) return;
+
+    const meta = ownerUsersMetaRef.current;
+    const merged = ((rows ?? []) as Post[]).map((p) => ({
+      ...p,
+      users: {
+        nickname: meta.nickname,
+        avatar_url: meta.avatar_url,
+        avatar_placeholder_hex: meta.avatar_placeholder_hex,
+        public_id: meta.public_id,
+      },
+    }));
+
+    const postIds = merged.map((p) => p.id);
+    let replyRowsFlat: PostReply[] = [];
+    if (postIds.length === 0) {
+      setRepliesByPost({});
+    } else {
+      const { data: replyRows, error: replyErr } = await supabase
+        .from("post_replies")
+        .select("*")
+        .in("post_id", postIds)
+        .order("created_at", { ascending: true });
+      if (replyErr) {
+        if (stillThisViewer()) setErrorMessage(replyErr.message);
+        return;
+      }
+      const rlist = (replyRows ?? []) as Array<{
+        id: number;
+        post_id: number;
+        user_id: string;
+        content: string;
+        pending_content?: string | null;
+        created_at?: string;
+        parent_reply_id?: number | null;
+      }>;
+      const replyAuthorIds = [
+        ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
+      ];
+      const replyProfileByUserId = new Map<
+        string,
+        {
+          nickname: string | null;
+          avatar_url: string | null;
+          avatar_placeholder_hex: string | null;
+          public_id: string | null;
+        }
+      >();
+      if (replyAuthorIds.length > 0) {
+        const { data: rprofiles, error: rpe } = await supabase
+          .from("users")
+          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
+          .in("id", replyAuthorIds);
+        if (rpe) {
+          if (stillThisViewer()) setErrorMessage(rpe.message);
+          return;
+        }
+        for (const row of rprofiles ?? []) {
+          replyProfileByUserId.set(row.id, {
+            nickname: row.nickname,
+            avatar_url: row.avatar_url ?? null,
+            avatar_placeholder_hex:
+              (row as { avatar_placeholder_hex?: string | null })
+                .avatar_placeholder_hex ?? null,
+            public_id:
+              typeof (row as { public_id?: string | null }).public_id ===
+              "string"
+                ? String(
+                    (row as { public_id?: string | null }).public_id
+                  ).trim() || null
+                : null,
+          });
+        }
+      }
+      const byPost: Record<number, PostReply[]> = {};
+      for (const r of rlist) {
+        const arr = byPost[r.post_id] ?? [];
+        const rp = replyProfileByUserId.get(r.user_id);
+        arr.push({
+          ...r,
+          users: {
+            nickname: rp?.nickname ?? null,
+            avatar_url: rp?.avatar_url ?? null,
+            avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
+            public_id: rp?.public_id ?? null,
+          },
+        });
+        byPost[r.post_id] = arr;
+      }
+      setRepliesByPost(byPost);
+      replyRowsFlat = Object.values(byPost).flat();
+    }
+
+    const postScoresFromDb = buildDevScoresByIdFromRows(merged);
+    const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
+    setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
+    setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
+    for (const pid of loadPostIdsPendingSecondModeration()) {
+      if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
+    }
+    for (const rid of loadReplyIdsPendingSecondModeration()) {
+      if (replyScoresFromDb[rid]?.second) removeReplyNeedsSecondModeration(rid);
+    }
+
+    setPosts(merged);
+  };
+
+  const reloadPostsAndRepliesRef = useRef(reloadPostsAndReplies);
+  reloadPostsAndRepliesRef.current = reloadPostsAndReplies;
+
+  const fetchOwnPosts = async (uid: string) => {
+    const stillThisViewer = () => homeSessionUserIdRef.current === uid;
 
     const profileRes = await supabase
       .from("users")
@@ -484,111 +616,16 @@ export default function HomePage() {
     if (!stillThisViewer()) {
       return;
     }
-    const merged = ((rows ?? []) as Post[]).map((p) => ({
-      ...p,
-      users: {
-        nickname,
-        avatar_url: avatarUrl,
-        avatar_placeholder_hex: placeholderHex,
-        public_id: pubId,
-      },
-    }));
 
-    const postIds = merged.map((p) => p.id);
-    let replyRowsFlat: PostReply[] = [];
-    if (postIds.length === 0) {
-      setRepliesByPost({});
-    } else {
-      const { data: replyRows, error: replyErr } = await supabase
-        .from("post_replies")
-        .select("*")
-        .in("post_id", postIds)
-        .order("created_at", { ascending: true });
+    ownerUsersMetaRef.current = {
+      nickname,
+      avatar_url: avatarUrl,
+      avatar_placeholder_hex: placeholderHex,
+      public_id: pubId,
+    };
+    await reloadPostsAndReplies(uid);
+    if (!stillThisViewer()) return;
 
-      if (replyErr) {
-        if (stillThisViewer()) setErrorMessage(replyErr.message);
-        return;
-      }
-
-      const rlist = (replyRows ?? []) as Array<{
-        id: number;
-        post_id: number;
-        user_id: string;
-        content: string;
-        pending_content?: string | null;
-        created_at?: string;
-        parent_reply_id?: number | null;
-      }>;
-      const replyAuthorIds = [
-        ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
-      ];
-      const replyProfileByUserId = new Map<
-        string,
-        {
-          nickname: string | null;
-          avatar_url: string | null;
-          avatar_placeholder_hex: string | null;
-          public_id: string | null;
-        }
-      >();
-      if (replyAuthorIds.length > 0) {
-        const { data: rprofiles, error: rpe } = await supabase
-          .from("users")
-          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
-          .in("id", replyAuthorIds);
-        if (rpe) {
-          if (stillThisViewer()) setErrorMessage(rpe.message);
-          return;
-        }
-        for (const row of rprofiles ?? []) {
-          replyProfileByUserId.set(row.id, {
-            nickname: row.nickname,
-            avatar_url: row.avatar_url ?? null,
-            avatar_placeholder_hex:
-              (row as { avatar_placeholder_hex?: string | null })
-                .avatar_placeholder_hex ?? null,
-            public_id:
-              typeof (row as { public_id?: string | null }).public_id ===
-              "string"
-                ? String(
-                    (row as { public_id?: string | null }).public_id
-                  ).trim() || null
-                : null,
-          });
-        }
-      }
-
-      const byPost: Record<number, PostReply[]> = {};
-      for (const r of rlist) {
-        const arr = byPost[r.post_id] ?? [];
-        const rp = replyProfileByUserId.get(r.user_id);
-        arr.push({
-          ...r,
-          users: {
-            nickname: rp?.nickname ?? null,
-            avatar_url: rp?.avatar_url ?? null,
-            avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
-            public_id: rp?.public_id ?? null,
-          },
-        });
-        byPost[r.post_id] = arr;
-      }
-      setRepliesByPost(byPost);
-      replyRowsFlat = Object.values(byPost).flat();
-    }
-
-    const postScoresFromDb = buildDevScoresByIdFromRows(merged);
-    const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
-    setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
-    setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
-    for (const pid of loadPostIdsPendingSecondModeration()) {
-      if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
-    }
-    for (const rid of loadReplyIdsPendingSecondModeration()) {
-      if (replyScoresFromDb[rid]?.second) removeReplyNeedsSecondModeration(rid);
-    }
-
-    setPosts(merged);
     setMustChangePassword(Boolean(profile?.must_change_password));
     setInviteLabel(
       typeof profile?.invite_label === "string" ? profile.invite_label : null
@@ -666,7 +703,7 @@ export default function HomePage() {
     if (!userId || !profileReady) return;
     if (!shouldPollTimeline) return;
     const id = window.setInterval(() => {
-      void fetchOwnPostsRef.current(userId);
+      void reloadPostsAndRepliesRef.current(userId);
     }, 30000);
     return () => window.clearInterval(id);
   }, [userId, profileReady, shouldPollTimeline]);
@@ -678,7 +715,7 @@ export default function HomePage() {
       const needSecond =
         loadPostIdsPendingSecondModeration().length > 0 ||
         loadReplyIdsPendingSecondModeration().length > 0;
-      if (needSecond) void fetchOwnPostsRef.current(userId);
+      if (needSecond) void reloadPostsAndRepliesRef.current(userId);
     }
     hadPendingContentRef.current = hasPendingContent;
   }, [authReady, userId, profileReady, hasPendingContent]);
