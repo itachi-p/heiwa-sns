@@ -52,7 +52,7 @@ Nagi SNS（仮名）は、現代のSNSにおける以下の課題に対する解
 
 - 最小構成から開始し、継続的に改善する
 - 技術は手段であり、設計思想を優先する
-- **E2E（ブラウザ経由の回帰テスト）には Playwright を使う**（手順は `docs/PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`。**アルゴリズムの数式**は `docs/dev/IMPLEMENTATION_REFERENCE.md`）
+- **E2E（ブラウザ経由の回帰テスト）には Playwright を使う**（現行の索引は `e2e/PLAYWRIGHT-INDEX.md`）
 
 ---
 
@@ -102,16 +102,10 @@ Nagi SNS（仮名）は、現代のSNSにおける以下の課題に対する解
 
 ---
 
-## ■ ドキュメント（索引）
+## ■ ドキュメント
 
-**まず** [`docs/INDEX.md`](docs/INDEX.md)（役割別の一覧・Cursor 参照順。ルート `README.md` とは別）。
-
-- **先行招待向け（段階別）**: `docs/INVITE_AT_A_GLANCE.md` → `INVITE_OVERVIEW.md` → `INVITE_DEEP_DIVE.md`
-- **実装の要約（数式・ファイルパス）**: `docs/dev/IMPLEMENTATION_REFERENCE.md`
-- 設計原則: `docs/PRODUCT_PRINCIPLES.md`／意思決定: `docs/DECISIONS.md`／前提・見送り: `docs/ASSUMPTIONS_AND_REJECTED_IDEAS.md`
-- 想定ターゲット: `docs/TARGET_AUDIENCE.md`／公開準備: `docs/LAUNCH_PLAN.md`
-- **Playwright（E2E）と手動検証**: `docs/PLAYWRIGHT_AND_TIMELINE_VERIFICATION.md`
-- （旧）外部向け英語 rationale は `docs/RATIONALE_PUBLIC.md` から `INVITE_*` へ統合済み
+- 現行の統合整理: `project_master_plan.md`
+- Playwright E2E の索引: `e2e/PLAYWRIGHT-INDEX.md`
 
 ---
 
