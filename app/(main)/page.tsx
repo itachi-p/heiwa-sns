@@ -399,10 +399,34 @@ export default function Home() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const hasActiveEditWindow = useMemo(() => {
+    if (!userId) return false;
+    for (const p of posts) {
+      if (
+        p.user_id === userId &&
+        getEditRemainingMs(p.created_at, nowTick) > 0
+      ) {
+        return true;
+      }
+    }
+    for (const list of Object.values(repliesByPost)) {
+      for (const r of list) {
+        if (
+          r.user_id === userId &&
+          getEditRemainingMs(r.created_at, nowTick) > 0
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [userId, posts, repliesByPost, nowTick]);
+
   useEffect(() => {
+    if (!hasActiveEditWindow) return;
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [hasActiveEditWindow]);
 
   useEffect(() => {
     setExpandedFoldedPosts(new Set());

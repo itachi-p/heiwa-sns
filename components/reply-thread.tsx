@@ -278,28 +278,35 @@ function ReplyItem({
         </div>
       ) : null}
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onToggleLikeReply(reply.id)}
-          className={[
-            "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
-            liked
-              ? "border-pink-300 bg-pink-50 text-pink-700"
-              : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50",
-          ].join(" ")}
-          aria-label="返信にスキ"
-          title="返信にスキ"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden="true"
+        {/*
+          自分の返信には「スキ」ボタンを表示しない（仕様）。
+          投稿側と整合させるため、閲覧者==投稿者（isAuthor）の場合はハートを出さない。
+          再発防止のため明示コメントを残す。
+        */}
+        {!isAuthor ? (
+          <button
+            type="button"
+            onClick={() => onToggleLikeReply(reply.id)}
+            className={[
+              "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
+              liked
+                ? "border-pink-300 bg-pink-50 text-pink-700"
+                : "border-gray-300 bg-white text-gray-500 hover:bg-gray-50",
+            ].join(" ")}
+            aria-label="返信にスキ"
+            title="返信にスキ"
           >
-            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-          </svg>
-        </button>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+            </svg>
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => onReplyBubble(reply)}

@@ -249,9 +249,6 @@ export default function HomePage() {
     () => new Set()
   );
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
-  const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
-    () => new Set()
-  );
   const [likedReplyIds, setLikedReplyIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -890,10 +887,34 @@ export default function HomePage() {
     if (!profileEditOpen) setInterestPickerOpen(false);
   }, [profileEditOpen]);
 
+  const hasActiveEditWindow = useMemo(() => {
+    if (!userId) return false;
+    for (const p of posts) {
+      if (
+        p.user_id === userId &&
+        getEditRemainingMs(p.created_at, nowTick) > 0
+      ) {
+        return true;
+      }
+    }
+    for (const list of Object.values(repliesByPost)) {
+      for (const r of list) {
+        if (
+          r.user_id === userId &&
+          getEditRemainingMs(r.created_at, nowTick) > 0
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [userId, posts, repliesByPost, nowTick]);
+
   useEffect(() => {
+    if (!hasActiveEditWindow) return;
     const id = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [hasActiveEditWindow]);
 
   useEffect(() => {
     if (editingPostId != null) {
@@ -1283,60 +1304,6 @@ export default function HomePage() {
       const next = new Set(prev);
       if (next.has(replyId)) next.delete(replyId);
       else next.add(replyId);
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    if (!userId) {
-      setLikedPostIds(new Set());
-      return;
-    }
-    const postIds = posts.map((p) => p.id);
-    if (postIds.length === 0) {
-      setLikedPostIds(new Set());
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const { data, error } = await supabase
-        .from("likes")
-        .select("post_id")
-        .eq("user_id", userId)
-        .in("post_id", postIds);
-      if (cancelled || error) return;
-      setLikedPostIds(new Set((data ?? []).map((r) => Number(r.post_id))));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, posts]);
-
-  const handleLike = async (postId: number) => {
-    if (!userId) return;
-    const liked = likedPostIds.has(postId);
-    if (liked) {
-      const { error } = await supabase
-        .from("likes")
-        .delete()
-        .eq("user_id", userId)
-        .eq("post_id", postId);
-      if (error) return;
-      setLikedPostIds((prev) => {
-        const next = new Set(prev);
-        next.delete(postId);
-        return next;
-      });
-      return;
-    }
-    const { error } = await supabase.from("likes").upsert(
-      { user_id: userId, post_id: postId },
-      { onConflict: "user_id,post_id" }
-    );
-    if (error) return;
-    setLikedPostIds((prev) => {
-      const next = new Set(prev);
-      next.add(postId);
       return next;
     });
   };
@@ -2697,28 +2664,12 @@ export default function HomePage() {
                           }
                         />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleLike(post.id)}
-                        className={[
-                          "inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors",
-                          likedPostIds.has(post.id)
-                            ? "border-pink-300 bg-pink-50 text-pink-700"
-                            : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
-                        ].join(" ")}
-                        aria-label="スキ"
-                        title="スキ"
-                      >
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
-                        </svg>
-                      </button>
+                      {/*
+                        自分の投稿には「スキ」ボタンを表示しない（仕様）。
+                        このブロックは fetchOwnPosts で user_id = 自分のみを取得しており、
+                        全件が自分の投稿である。過去に誤ってスキボタンが追加された経緯があるため
+                        再発防止として明示的に記載する。 ref: commit 79b5c67
+                      */}
                     </div>
                     {openedReplyPosts.has(post.id) ? (
                       <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
