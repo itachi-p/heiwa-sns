@@ -134,8 +134,10 @@ export function ComposeModal({
               void (async () => {
                 const r = await preparePostImageForUpload(file);
                 if (!r.ok) {
-                  // 既存仕様互換: compose-form-error は UI に描画していなかったため、
-                  // 画像準備失敗時は無通知で添付を取りやめる挙動を踏襲する。
+                  // 画像の縮小/圧縮や形式チェックで失敗した場合、理由不明のまま
+                  // 添付が無視されると利用者は原因が分からないため、
+                  // preparePostImageForUpload が返す message をトーストで通知する。
+                  onValidationError(r.message);
                   return;
                 }
                 setImage({
