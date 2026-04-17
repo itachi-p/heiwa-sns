@@ -98,6 +98,10 @@ export default function HomeActivityPage() {
   const [profilePlaceholderHex, setProfilePlaceholderHex] = useState<
     string | null
   >(null);
+  // 返信一覧から元投稿へ遷移する際、`/home` 経由だと `/@{publicId}` への
+  // リダイレクト時に ?post=X が欠落してスクロール先にたどり着けないため、
+  // 自分の public_id を保持して `/@{publicId}?post=X` に直接リンクする。
+  const [viewerPublicId, setViewerPublicId] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toxicityThreshold, setToxicityThreshold] = useState(0.7);
@@ -146,7 +150,7 @@ export default function HomeActivityPage() {
     const { data: me, error: meErr } = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label"
+        "nickname, avatar_url, avatar_placeholder_hex, public_id, must_change_password, invite_label"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -160,6 +164,10 @@ export default function HomeActivityPage() {
     setProfilePlaceholderHex(
       (me as { avatar_placeholder_hex?: string | null } | null)
         ?.avatar_placeholder_hex ?? null
+    );
+    const viewerPid = (me as { public_id?: string | null } | null)?.public_id;
+    setViewerPublicId(
+      typeof viewerPid === "string" && viewerPid.trim() ? viewerPid.trim() : null
     );
     const meRow = me as {
       must_change_password?: boolean | null;
@@ -392,7 +400,11 @@ export default function HomeActivityPage() {
                         </time>
                       </div>
                       <Link
-                        href={`/home?post=${row.post_id}`}
+                        href={
+                          viewerPublicId
+                            ? `/@${viewerPublicId}?post=${row.post_id}`
+                            : `/home?post=${row.post_id}`
+                        }
                         className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"
                       >
                         <p className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-snug text-gray-600">

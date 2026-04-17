@@ -715,7 +715,9 @@ export default function HomePage() {
     requestAnimationFrame(() => {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
     });
-    window.history.replaceState(null, "", "/home");
+    // HomePage は /home と /@{publicId} の両方から描画されるため、
+    // スクロール後の URL クリーンアップはハードコードせず現在のパスへ戻す。
+    window.history.replaceState(null, "", window.location.pathname);
   }, [posts]);
 
   useEffect(() => {
