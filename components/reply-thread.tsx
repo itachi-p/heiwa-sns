@@ -3,13 +3,12 @@
 import Link from "next/link";
 import React, { memo, useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
+import { EditCountdownBadge } from "@/components/edit-countdown-badge";
 import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   canEditOwnReply,
-  formatRemainingLabel,
-  getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
@@ -73,7 +72,6 @@ type ItemProps = {
   childrenByParent: Record<number, PostReplyRow[]>;
   userId: string | null;
   canInteract: boolean;
-  nowTick: number;
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
@@ -101,7 +99,6 @@ function ReplyItemRaw({
   childrenByParent,
   userId,
   canInteract,
-  nowTick,
   editingReplyId,
   editReplyDraft,
   replyEditSaving,
@@ -122,7 +119,6 @@ function ReplyItemRaw({
   const [foldExpanded, setFoldExpanded] = useState(false);
   const kids = childrenByParent[reply.id] ?? [];
   const showEdit = canEditOwnReply(reply.created_at, userId, reply.user_id);
-  const remainingLabel = formatRemainingLabel(getEditRemainingMs(reply.created_at));
 
   const isAuthor = userId != null && userId === reply.user_id;
   const maxScore = effectiveScoreForViewerToxicityFilter(
@@ -187,11 +183,12 @@ function ReplyItemRaw({
           </span>
         </div>
         <div className="absolute right-2 top-2 flex shrink-0 flex-wrap items-center gap-1">
-          {showEdit ? (
-            <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
-              編集残り {remainingLabel}
-            </span>
-          ) : null}
+          {/*
+            「編集残り」バッジは常時表示をやめ、編集フォーム内に移設した。
+            旧実装では親の nowTick を毎秒更新していたため ReplyThread 全体が
+            1秒毎に再レンダーされて重かった。現仕様では編集フォームを開いた
+            時だけ EditCountdownBadge 内部の自前タイマーで表示する。
+          */}
           {showEdit ? (
             editingReplyId === reply.id ? (
               <button
@@ -232,7 +229,7 @@ function ReplyItemRaw({
             disabled={replyEditSaving}
             className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug text-gray-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               disabled={replyEditSaving}
@@ -241,6 +238,7 @@ function ReplyItemRaw({
             >
               {replyEditSaving ? "保存中…" : "保存"}
             </button>
+            <EditCountdownBadge createdAt={reply.created_at} />
           </div>
         </div>
       ) : replyFolded && !foldExpanded ? (
@@ -259,8 +257,7 @@ function ReplyItemRaw({
             resolvePendingVisibleContent(
               reply.content,
               reply.pending_content,
-              reply.created_at,
-              nowTick
+              reply.created_at
             )
           )}
         </div>
@@ -334,7 +331,6 @@ function ReplyItemRaw({
               childrenByParent={childrenByParent}
               userId={userId}
               canInteract={canInteract}
-              nowTick={nowTick}
               editingReplyId={editingReplyId}
               editReplyDraft={editingReplyId === c.id ? editReplyDraft : ""}
               replyEditSaving={replyEditSaving}
@@ -363,7 +359,6 @@ type ThreadProps = {
   childrenByParent: Record<number, PostReplyRow[]>;
   userId: string | null;
   canInteract: boolean;
-  nowTick: number;
   editingReplyId: number | null;
   editReplyDraft: string;
   replyEditSaving: boolean;
@@ -397,7 +392,6 @@ function ReplyThreadRaw(props: ThreadProps) {
           childrenByParent={props.childrenByParent}
           userId={props.userId}
           canInteract={props.canInteract}
-          nowTick={props.nowTick}
           editingReplyId={props.editingReplyId}
           editReplyDraft={
             props.editingReplyId === r.id ? props.editReplyDraft : ""

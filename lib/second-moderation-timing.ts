@@ -6,7 +6,7 @@ import { POST_EDIT_WINDOW_MS } from "@/lib/post-edit-window";
  */
 export function isPastInitialEditWindow(
   createdAtIso: string | undefined,
-  nowMs: number
+  nowMs: number = Date.now()
 ): boolean {
   if (!createdAtIso) return false;
   const t = new Date(createdAtIso).getTime();

@@ -12,6 +12,7 @@ import React, {
 import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
+import { EditCountdownBadge } from "@/components/edit-countdown-badge";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { AppToastPortal } from "@/components/app-toast-portal";
@@ -48,7 +49,6 @@ import { isMissingAvatarPlaceholderHexError } from "@/lib/users-update-fallback"
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import {
   canEditOwnPost,
-  formatRemainingLabel,
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
@@ -237,7 +237,11 @@ export default function Home() {
   /** 数秒で消える通知（編集保存・注意など） */
   type ToastState = { message: string; tone: "default" | "error" };
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
+  /*
+   * 編集窓（投稿から15分）が切れるタイミングで 1 回だけ再レンダーする仕掛け。
+   * 詳細は home/page.tsx の同名 state のコメントを参照。
+   */
+  const [expiryTick, setExpiryTick] = useState(0);
   const [likedPostIds, setLikedPostIds] = useState<Set<number>>(
     () => new Set()
   );
@@ -400,34 +404,36 @@ export default function Home() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const hasActiveEditWindow = useMemo(() => {
-    if (!userId) return false;
-    for (const p of posts) {
-      if (
-        p.user_id === userId &&
-        getEditRemainingMs(p.created_at, nowTick) > 0
-      ) {
-        return true;
-      }
-    }
-    for (const list of Object.values(repliesByPost)) {
-      for (const r of list) {
-        if (
-          r.user_id === userId &&
-          getEditRemainingMs(r.created_at, nowTick) > 0
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }, [userId, posts, repliesByPost, nowTick]);
-
+  /**
+   * 自分の投稿/返信のうち、まだ編集可能な最短の期限に合わせて setTimeout で
+   * expiryTick を進める。詳細は home/page.tsx の同等 useEffect のコメントを参照。
+   */
   useEffect(() => {
-    if (!hasActiveEditWindow) return;
-    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [hasActiveEditWindow]);
+    if (!userId) return;
+    let next = Infinity;
+    const now = Date.now();
+    const consider = (
+      createdAt: string | undefined,
+      authorId: string | undefined
+    ) => {
+      if (!authorId || authorId !== userId) return;
+      const remaining = getEditRemainingMs(createdAt, now);
+      if (remaining <= 0) return;
+      const expiresAt = now + remaining;
+      if (expiresAt < next) next = expiresAt;
+    };
+    for (const p of posts) consider(p.created_at, p.user_id);
+    for (const list of Object.values(repliesByPost)) {
+      for (const r of list) consider(r.created_at, r.user_id);
+    }
+    if (!Number.isFinite(next)) return;
+    const delay = Math.max(0, next - now) + 50;
+    const id = window.setTimeout(
+      () => setExpiryTick((x) => x + 1),
+      delay
+    );
+    return () => window.clearTimeout(id);
+  }, [userId, posts, repliesByPost, expiryTick]);
 
   useEffect(() => {
     setExpandedFoldedPosts(new Set());
@@ -436,7 +442,7 @@ export default function Home() {
   useEffect(() => {
     if (editingPostId != null) {
       const post = posts.find((p) => p.id === editingPostId);
-      if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
+      if (post && getEditRemainingMs(post.created_at) <= 0) {
         setEditingPostId(null);
         setToast({
           message:
@@ -448,7 +454,7 @@ export default function Home() {
     if (editingReplyId != null) {
       const allReplies = Object.values(repliesByPost).flat();
       const reply = allReplies.find((r) => r.id === editingReplyId);
-      if (reply && getEditRemainingMs(reply.created_at, nowTick) <= 0) {
+      if (reply && getEditRemainingMs(reply.created_at) <= 0) {
         setEditingReplyId(null);
         setToast({
           message:
@@ -457,7 +463,7 @@ export default function Home() {
         });
       }
     }
-  }, [nowTick, editingPostId, editingReplyId, posts, repliesByPost]);
+  }, [expiryTick, editingPostId, editingReplyId, posts, repliesByPost]);
 
   /** トリガー失敗時の保険: 自分の行を upsert（RLS で auth.uid() = id のみ可） */
   async function ensurePublicUserRow(u: User) {
@@ -868,7 +874,7 @@ export default function Home() {
         if (post.pending_content?.trim()) continue;
 
         if (
-          !isPastInitialEditWindow(post.created_at, nowTick)
+          !isPastInitialEditWindow(post.created_at)
         ) {
           continue;
         }
@@ -937,7 +943,7 @@ export default function Home() {
         if (reply.pending_content?.trim()) continue;
 
         if (
-          !isPastInitialEditWindow(reply.created_at, nowTick)
+          !isPastInitialEditWindow(reply.created_at)
         ) {
           continue;
         }
@@ -1005,7 +1011,7 @@ export default function Home() {
     postScoresById,
     replyScoresById,
     userId,
-    nowTick,
+    expiryTick,
   ]);
 
   const fetchLikes = async (uid: string) => {
@@ -1830,6 +1836,10 @@ export default function Home() {
   };
 
   const replyModalContext = useMemo(() => {
+    // expiryTick を deps に含めることで、編集窓が切れた瞬間に
+    // resolvePendingVisibleContent() の結果（pending_content のプレビュー切替）を
+    // 再評価する。値自体は参照しないので void で lint を満たす。
+    void expiryTick;
     const pid = replyComposerPostId;
     if (pid == null) return null;
     const post = posts.find((p) => p.id === pid);
@@ -1846,8 +1856,7 @@ export default function Home() {
       const text = resolvePendingVisibleContent(
         r.content,
         r.pending_content,
-        r.created_at,
-        nowTick
+        r.created_at
       );
       return {
         targetNickname: r.users?.nickname ?? null,
@@ -1859,8 +1868,7 @@ export default function Home() {
     const text = resolvePendingVisibleContent(
       post.content,
       post.pending_content,
-      post.created_at,
-      nowTick
+      post.created_at
     );
     return {
       targetNickname: post.users?.nickname ?? null,
@@ -1868,7 +1876,7 @@ export default function Home() {
       targetPlaceholderHex: post.users?.avatar_placeholder_hex ?? null,
       targetPreview: clip(text),
     };
-  }, [replyComposerPostId, replyParentReplyId, posts, repliesByPost, nowTick]);
+  }, [replyComposerPostId, replyParentReplyId, posts, repliesByPost, expiryTick]);
 
   useEffect(() => {
     if (replyComposerPostId == null) return;
@@ -2094,12 +2102,11 @@ export default function Home() {
                     post.user_id === userId &&
                     canEditOwnPost(post.created_at, userId, post.user_id) ? (
                       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
-                          編集残り{" "}
-                          {formatRemainingLabel(
-                            getEditRemainingMs(post.created_at, nowTick)
-                          )}
-                        </span>
+                        {/*
+                          「編集残り MM:SS」の常時表示は廃止。編集フォームを開いた
+                          時だけ下の EditCountdownBadge で表示する。
+                          詳細は home/page.tsx の同等ブロックのコメント参照。
+                        */}
                         {editingPostId === post.id ? (
                           <button
                             type="button"
@@ -2184,7 +2191,7 @@ export default function Home() {
                         disabled={postEditSaving}
                         className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
                       />
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           disabled={postEditSaving}
@@ -2193,6 +2200,7 @@ export default function Home() {
                         >
                           {postEditSaving ? "保存中…" : "保存"}
                         </button>
+                        <EditCountdownBadge createdAt={post.created_at} />
                       </div>
                     </div>
                     ) : (
@@ -2201,8 +2209,7 @@ export default function Home() {
                         resolvePendingVisibleContent(
                           post.content,
                           post.pending_content,
-                          post.created_at,
-                          nowTick
+                          post.created_at
                         )
                       )}
                     </div>
@@ -2305,7 +2312,6 @@ export default function Home() {
                             childrenByParent={parted.childrenByParent}
                             userId={userId}
                             canInteract={canInteract}
-                            nowTick={nowTick}
                             editingReplyId={editingReplyId}
                             editReplyDraft={editReplyDraft}
                             replyEditSaving={replyEditSaving}

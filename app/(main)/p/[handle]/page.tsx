@@ -728,7 +728,6 @@ export default function PublicProfilePage() {
                                   childrenByParent={parted.childrenByParent}
                                   userId={sessionId}
                                   canInteract={canInteract}
-                                  nowTick={Date.now()}
                                   editingReplyId={null}
                                   editReplyDraft=""
                                   replyEditSaving={false}

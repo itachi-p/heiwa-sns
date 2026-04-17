@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
+import { EditCountdownBadge } from "@/components/edit-countdown-badge";
 import { ComposeModal } from "@/components/home/compose-modal";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import {
@@ -52,7 +53,6 @@ import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus"
 import { sanitizeExternalProfileUrl } from "@/lib/sanitize-external-url";
 import {
   canEditOwnPost,
-  formatRemainingLabel,
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
@@ -215,7 +215,20 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   type ToastState = { message: string; tone: "default" | "error" };
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [nowTick, setNowTick] = useState(() => Date.now());
+  /*
+   * 編集窓（投稿から15分）が切れるタイミングで 1 回だけ再レンダーする仕掛け。
+   * 以前は 1 秒ごとに更新される nowTick を持ち、タイムラインの「編集残り MM:SS」
+   * バッジ表示や "編集時間切れで自動クローズ" の判定に使っていたが、そのために
+   * HomePage 全体が毎秒再レンダーされ動作が重くなる原因になっていた。
+   *
+   * 現仕様では:
+   *  - 編集残りバッジは編集フォームを開いた時だけ EditCountdownBadge の内部
+   *    タイマーで描画する。
+   *  - 「編集時間切れで自動クローズ」や pending_content のプレビュー切替といった
+   *    期限ぴったりで 1 回だけ再評価したい処理は、次に到来する最短期限に合わせた
+   *    setTimeout でこの expiryTick を更新し、再レンダーを誘発する。
+   */
+  const [expiryTick, setExpiryTick] = useState(0);
   const [editingPostId, setEditingPostId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [postEditSaving, setPostEditSaving] = useState(false);
@@ -719,7 +732,7 @@ export default function HomePage() {
         }
         if (post.pending_content?.trim()) continue;
 
-        if (!isPastInitialEditWindow(post.created_at, nowTick)) {
+        if (!isPastInitialEditWindow(post.created_at)) {
           continue;
         }
 
@@ -786,7 +799,7 @@ export default function HomePage() {
         }
         if (reply.pending_content?.trim()) continue;
 
-        if (!isPastInitialEditWindow(reply.created_at, nowTick)) {
+        if (!isPastInitialEditWindow(reply.created_at)) {
           continue;
         }
 
@@ -854,7 +867,7 @@ export default function HomePage() {
     repliesByPost,
     postScoresById,
     replyScoresById,
-    nowTick,
+    expiryTick,
   ]);
 
   useEffect(() => {
@@ -894,39 +907,47 @@ export default function HomePage() {
     if (!profileEditOpen) setInterestPickerOpen(false);
   }, [profileEditOpen]);
 
-  const hasActiveEditWindow = useMemo(() => {
-    if (!userId) return false;
-    for (const p of posts) {
-      if (
-        p.user_id === userId &&
-        getEditRemainingMs(p.created_at, nowTick) > 0
-      ) {
-        return true;
-      }
-    }
-    for (const list of Object.values(repliesByPost)) {
-      for (const r of list) {
-        if (
-          r.user_id === userId &&
-          getEditRemainingMs(r.created_at, nowTick) > 0
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }, [userId, posts, repliesByPost, nowTick]);
-
+  /**
+   * 自分の投稿/返信のうち、まだ編集可能な最短の期限（= 作成から 15 分後）を
+   * 見つけ、そのタイミングで setTimeout を発火して expiryTick を 1 だけ進める。
+   *
+   * これによって:
+   *  - 期限到達時に 1 度だけ再レンダーが走る（編集ボタンが消える / pending_content が
+   *    表示に切り替わる / 下の useEffect で開いている編集フォームを自動クローズ）。
+   *  - 1 秒毎の ticker は存在しないため通常時は非常に軽い。
+   *  - expiryTick が進むと本 useEffect 自身も再実行され、次に短い期限を探し直す。
+   */
   useEffect(() => {
-    if (!hasActiveEditWindow) return;
-    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [hasActiveEditWindow]);
+    if (!userId) return;
+    let next = Infinity;
+    const now = Date.now();
+    const consider = (
+      createdAt: string | undefined,
+      authorId: string | undefined
+    ) => {
+      if (!authorId || authorId !== userId) return;
+      const remaining = getEditRemainingMs(createdAt, now);
+      if (remaining <= 0) return;
+      const expiresAt = now + remaining;
+      if (expiresAt < next) next = expiresAt;
+    };
+    for (const p of posts) consider(p.created_at, p.user_id);
+    for (const list of Object.values(repliesByPost)) {
+      for (const r of list) consider(r.created_at, r.user_id);
+    }
+    if (!Number.isFinite(next)) return;
+    const delay = Math.max(0, next - now) + 50;
+    const id = window.setTimeout(
+      () => setExpiryTick((x) => x + 1),
+      delay
+    );
+    return () => window.clearTimeout(id);
+  }, [userId, posts, repliesByPost, expiryTick]);
 
   useEffect(() => {
     if (editingPostId != null) {
       const post = posts.find((p) => p.id === editingPostId);
-      if (post && getEditRemainingMs(post.created_at, nowTick) <= 0) {
+      if (post && getEditRemainingMs(post.created_at) <= 0) {
         setEditingPostId(null);
         setToast({
           message:
@@ -938,7 +959,7 @@ export default function HomePage() {
     if (editingReplyId != null) {
       const allReplies = Object.values(repliesByPost).flat();
       const reply = allReplies.find((r) => r.id === editingReplyId);
-      if (reply && getEditRemainingMs(reply.created_at, nowTick) <= 0) {
+      if (reply && getEditRemainingMs(reply.created_at) <= 0) {
         setEditingReplyId(null);
         setToast({
           message:
@@ -947,7 +968,7 @@ export default function HomePage() {
         });
       }
     }
-  }, [nowTick, editingPostId, editingReplyId, posts, repliesByPost]);
+  }, [expiryTick, editingPostId, editingReplyId, posts, repliesByPost]);
 
   useEffect(() => {
     if (!userId || !user) {
@@ -1454,6 +1475,10 @@ export default function HomePage() {
   }
 
   const replyModalContext = useMemo(() => {
+    // expiryTick を deps に含めることで、編集窓が切れた瞬間に
+    // resolvePendingVisibleContent() の結果（pending_content のプレビュー切替）を
+    // 再評価する。値自体は参照しないので void で lint を満たす。
+    void expiryTick;
     const pid = replyComposerPostId;
     if (pid == null) return null;
     const post = posts.find((p) => p.id === pid);
@@ -1470,8 +1495,7 @@ export default function HomePage() {
       const text = resolvePendingVisibleContent(
         r.content,
         r.pending_content,
-        r.created_at,
-        nowTick
+        r.created_at
       );
       return {
         targetNickname: r.users?.nickname ?? null,
@@ -1483,8 +1507,7 @@ export default function HomePage() {
     const text = resolvePendingVisibleContent(
       post.content,
       post.pending_content,
-      post.created_at,
-      nowTick
+      post.created_at
     );
     return {
       targetNickname: post.users?.nickname ?? null,
@@ -1492,7 +1515,7 @@ export default function HomePage() {
       targetPlaceholderHex: post.users?.avatar_placeholder_hex ?? null,
       targetPreview: clip(text),
     };
-  }, [replyComposerPostId, replyParentReplyId, posts, repliesByPost, nowTick]);
+  }, [replyComposerPostId, replyParentReplyId, posts, repliesByPost, expiryTick]);
 
   useEffect(() => {
     if (replyComposerPostId == null) return;
@@ -2505,12 +2528,13 @@ export default function HomePage() {
                       post.user_id &&
                       canEditOwnPost(post.created_at, userId, post.user_id) ? (
                         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
-                            編集残り{" "}
-                            {formatRemainingLabel(
-                              getEditRemainingMs(post.created_at, nowTick)
-                            )}
-                          </span>
+                          {/*
+                            「編集残り MM:SS」の常時表示バッジは廃止した。
+                            旧実装は HomePage の nowTick state を 1 秒毎に更新する
+                            必要があり、タイムライン全体が毎秒再描画され重さの一因に
+                            なっていた。現仕様では「編集」ボタンを押した時だけ編集
+                            フォーム内に EditCountdownBadge で表示する。
+                          */}
                           {editingPostId === post.id ? (
                             <button
                               type="button"
@@ -2563,7 +2587,7 @@ export default function HomePage() {
                           disabled={postEditSaving}
                           className="min-h-[2.75rem] w-full resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-50"
                         />
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             disabled={postEditSaving}
@@ -2572,6 +2596,7 @@ export default function HomePage() {
                           >
                             {postEditSaving ? "保存中…" : "保存"}
                           </button>
+                          <EditCountdownBadge createdAt={post.created_at} />
                         </div>
                       </div>
                     ) : (
@@ -2580,8 +2605,7 @@ export default function HomePage() {
                           resolvePendingVisibleContent(
                             post.content,
                             post.pending_content,
-                            post.created_at,
-                            nowTick
+                            post.created_at
                           )
                         )}
                       </div>
@@ -2650,7 +2674,6 @@ export default function HomePage() {
                               childrenByParent={parted.childrenByParent}
                               userId={userId}
                               canInteract={canInteract}
-                              nowTick={nowTick}
                               editingReplyId={editingReplyId}
                               editReplyDraft={editReplyDraft}
                               replyEditSaving={replyEditSaving}
