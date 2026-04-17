@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { SiteHeader } from "@/components/site-header";
@@ -437,14 +437,45 @@ export default function PublicProfilePage() {
     }
   };
 
-  const toggleReplyLikeLocal = (replyId: number) => {
+  const toggleReplyLikeLocal = useCallback((replyId: number) => {
     setLikedReplyIds((prev) => {
       const next = new Set(prev);
       if (next.has(replyId)) next.delete(replyId);
       else next.add(replyId);
       return next;
     });
-  };
+  }, []);
+
+  /**
+   * 他者プロフィール画面では返信の編集/削除/下書き変更は不可（自分でないため）。
+   * ReplyThread の型に合わせて no-op の安定参照を 1 回作り、memo を効かせる。
+   */
+  const stableNoopDraftChange = useCallback((_v: string) => {}, []);
+  const stableNoopStartEdit = useCallback(
+    (_r: { id: number; content: string; pending_content?: string | null }) => {},
+    []
+  );
+  const stableNoop = useCallback(() => {}, []);
+  const stableNoopSaveOrDelete = useCallback((_id: number) => {}, []);
+  const stableOnReplyBubble = useCallback(
+    (r: { id: number; post_id: number }) => {
+      setInlineReplyPostId(r.post_id);
+      setReplyParentReplyId(r.id);
+    },
+    []
+  );
+
+  const partitionByPost = useMemo(() => {
+    const map: Record<
+      number,
+      { roots: PostReplyRow[]; childrenByParent: Record<number, PostReplyRow[]> }
+    > = {};
+    for (const [pidStr, list] of Object.entries(repliesByPost)) {
+      if (!list || list.length === 0) continue;
+      map[Number(pidStr)] = partitionRepliesByParent(list);
+    }
+    return map;
+  }, [repliesByPost]);
 
   return (
     isOwn ? (
@@ -683,14 +714,12 @@ export default function PublicProfilePage() {
                               </form>
                             ) : null}
                             {(() => {
-                              const flat = repliesByPost[post.id] ?? [];
-                              if (flat.length === 0) return null;
-                              const { roots, childrenByParent } =
-                                partitionRepliesByParent(flat);
+                              const parted = partitionByPost[post.id];
+                              if (!parted) return null;
                               return (
                                 <ReplyThread
-                                  roots={roots}
-                                  childrenByParent={childrenByParent}
+                                  roots={parted.roots}
+                                  childrenByParent={parted.childrenByParent}
                                   userId={sessionId}
                                   canInteract={canInteract}
                                   nowTick={Date.now()}
@@ -700,11 +729,11 @@ export default function PublicProfilePage() {
                                   replyVisibilityThreshold={1}
                                   overThresholdBehavior="hide"
                                   replyScoresById={replyScoresById}
-                                  onEditDraftChange={() => {}}
-                                  onStartEdit={() => {}}
-                                  onCancelEdit={() => {}}
-                                  onSaveEdit={() => {}}
-                                  onDelete={() => {}}
+                                  onEditDraftChange={stableNoopDraftChange}
+                                  onStartEdit={stableNoopStartEdit}
+                                  onCancelEdit={stableNoop}
+                                  onSaveEdit={stableNoopSaveOrDelete}
+                                  onDelete={stableNoopSaveOrDelete}
                                   likedReplyIds={likedReplyIds}
                                   onToggleLikeReply={toggleReplyLikeLocal}
                                   activeReplyTargetId={
@@ -712,10 +741,7 @@ export default function PublicProfilePage() {
                                       ? replyParentReplyId
                                       : null
                                   }
-                                  onReplyBubble={(r) => {
-                                    setInlineReplyPostId(post.id);
-                                    setReplyParentReplyId(r.id);
-                                  }}
+                                  onReplyBubble={stableOnReplyBubble}
                                 />
                               );
                             })()}

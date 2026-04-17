@@ -2,6 +2,7 @@
 
 import React, {
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -1750,6 +1751,61 @@ export default function Home() {
     // 一覧を再 fetch しない（スクロールが先頭に戻るのを防ぐ）。アンスキと同様。
   };
 
+  /**
+   * ReplyThread / ReplyItem に渡す安定コールバック群。
+   * 最新実体は ref 経由で差し替え、外に渡す参照は固定化して React.memo を効かせる。
+   */
+  const handleDeleteReplyRef = useRef(handleDeleteReply);
+  handleDeleteReplyRef.current = handleDeleteReply;
+  const handleSaveReplyEditRef = useRef(handleSaveReplyEdit);
+  handleSaveReplyEditRef.current = handleSaveReplyEdit;
+  const stableOnDeleteReply = useCallback((rid: number) => {
+    void handleDeleteReplyRef.current(rid);
+  }, []);
+  const stableOnSaveReplyEdit = useCallback((rid: number) => {
+    void handleSaveReplyEditRef.current(rid);
+  }, []);
+  const stableOnStartEditReply = useCallback(
+    (r: { id: number; content: string; pending_content?: string | null }) => {
+      setEditingReplyId(r.id);
+      setEditReplyDraft(r.pending_content ?? r.content);
+    },
+    []
+  );
+  const stableOnCancelEditReply = useCallback(() => {
+    setEditingReplyId(null);
+  }, []);
+  const stableOnToggleLikeReply = useCallback((replyId: number) => {
+    setLikedReplyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(replyId)) next.delete(replyId);
+      else next.add(replyId);
+      return next;
+    });
+  }, []);
+  const stableOnReplyBubble = useCallback(
+    (r: { id: number; post_id: number }) => {
+      setInlineReplyPostId(r.post_id);
+      setReplyParentReplyId(r.id);
+    },
+    []
+  );
+  const stableOnEditDraftChange = useCallback((v: string) => {
+    setEditReplyDraft(v);
+  }, []);
+
+  const partitionByPost = useMemo(() => {
+    const map: Record<
+      number,
+      { roots: PostReply[]; childrenByParent: Record<number, PostReply[]> }
+    > = {};
+    for (const [pidStr, list] of Object.entries(repliesByPost)) {
+      if (!list || list.length === 0) continue;
+      map[Number(pidStr)] = partitionRepliesByParent(list);
+    }
+    return map;
+  }, [repliesByPost]);
+
   const canInteract =
     Boolean(userId) &&
     profileReady &&
@@ -2250,14 +2306,12 @@ export default function Home() {
                     {openedReplyPosts.has(post.id) ? (
                     <div className="mt-3 border-t border-gray-100 pt-3 text-sm">
                       {(() => {
-                        const flat = repliesByPost[post.id] ?? [];
-                          if (flat.length === 0) return null;
-                        const { roots, childrenByParent } =
-                          partitionRepliesByParent(flat);
+                        const parted = partitionByPost[post.id];
+                        if (!parted) return null;
                         return (
                           <ReplyThread
-                            roots={roots}
-                            childrenByParent={childrenByParent}
+                            roots={parted.roots}
+                            childrenByParent={parted.childrenByParent}
                             userId={userId}
                             canInteract={canInteract}
                             nowTick={nowTick}
@@ -2271,25 +2325,19 @@ export default function Home() {
                             }
                             overThresholdBehavior={toxicityOverThresholdBehavior}
                             replyScoresById={replyScoresById}
-                            onEditDraftChange={setEditReplyDraft}
-                            onStartEdit={(r) => {
-                              setEditingReplyId(r.id);
-                              setEditReplyDraft(r.pending_content ?? r.content);
-                            }}
-                            onCancelEdit={() => setEditingReplyId(null)}
-                            onSaveEdit={(rid) => void handleSaveReplyEdit(rid)}
-                            onDelete={handleDeleteReply}
+                            onEditDraftChange={stableOnEditDraftChange}
+                            onStartEdit={stableOnStartEditReply}
+                            onCancelEdit={stableOnCancelEditReply}
+                            onSaveEdit={stableOnSaveReplyEdit}
+                            onDelete={stableOnDeleteReply}
                               likedReplyIds={likedReplyIds}
-                              onToggleLikeReply={toggleReplyLikeLocal}
+                              onToggleLikeReply={stableOnToggleLikeReply}
                               activeReplyTargetId={
                                 replyComposerPostId === post.id
                                   ? replyParentReplyId
                                   : null
                               }
-                              onReplyBubble={(r) => {
-                                setInlineReplyPostId(post.id);
-                                setReplyParentReplyId(r.id);
-                              }}
+                              onReplyBubble={stableOnReplyBubble}
                           />
                         );
                       })()}

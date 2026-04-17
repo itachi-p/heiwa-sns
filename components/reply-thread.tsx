@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useState } from "react";
+import React, { memo, useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
@@ -95,7 +95,7 @@ type ItemProps = {
   onReplyBubble: (reply: PostReplyRow) => void;
 };
 
-function ReplyItem({
+function ReplyItemRaw({
   reply,
   depth,
   childrenByParent,
@@ -336,7 +336,7 @@ function ReplyItem({
               canInteract={canInteract}
               nowTick={nowTick}
               editingReplyId={editingReplyId}
-              editReplyDraft={editReplyDraft}
+              editReplyDraft={editingReplyId === c.id ? editReplyDraft : ""}
               replyEditSaving={replyEditSaving}
               replyVisibilityThreshold={replyVisibilityThreshold}
               overThresholdBehavior={overThresholdBehavior}
@@ -384,7 +384,9 @@ type ThreadProps = {
   onReplyBubble: (reply: PostReplyRow) => void;
 };
 
-export function ReplyThread(props: ThreadProps) {
+const ReplyItem = memo(ReplyItemRaw);
+
+function ReplyThreadRaw(props: ThreadProps) {
   return (
     <ul className="space-y-2">
       {props.roots.map((r) => (
@@ -397,7 +399,9 @@ export function ReplyThread(props: ThreadProps) {
           canInteract={props.canInteract}
           nowTick={props.nowTick}
           editingReplyId={props.editingReplyId}
-          editReplyDraft={props.editReplyDraft}
+          editReplyDraft={
+            props.editingReplyId === r.id ? props.editReplyDraft : ""
+          }
           replyEditSaving={props.replyEditSaving}
           replyVisibilityThreshold={props.replyVisibilityThreshold}
           overThresholdBehavior={props.overThresholdBehavior}
@@ -416,3 +420,10 @@ export function ReplyThread(props: ThreadProps) {
     </ul>
   );
 }
+
+/**
+ * メモ化して、親が再レンダーしてもpropsが変わっていなければ全展開ツリーの再描画を避ける。
+ * 呼び出し側はコールバックを useCallback、`childrenByParent` / `roots` を useMemo で
+ * 安定させる前提。
+ */
+export const ReplyThread = memo(ReplyThreadRaw);
