@@ -1768,7 +1768,13 @@ export default function Home() {
   const stableOnCancelEditReply = useCallback(() => {
     setEditingReplyId(null);
   }, []);
+  // 非ログイン/プロフィール未確定時に返信「スキ」が silent に
+  // トグルされていたため、投稿側と同じ tryInteraction ゲートを通す。
+  // useCallback は deps=[] で維持したいので ref 経由で最新の
+  // tryInteraction を参照する。
+  const tryInteractionRef = useRef<() => boolean>(() => false);
   const stableOnToggleLikeReply = useCallback((replyId: number) => {
+    if (!tryInteractionRef.current()) return;
     setLikedReplyIds((prev) => {
       const next = new Set(prev);
       if (next.has(replyId)) next.delete(replyId);
@@ -1830,6 +1836,9 @@ export default function Home() {
     }
     return true;
   };
+  // stableOnToggleLikeReply（deps=[] のため stale closure になる）から
+  // 最新の tryInteraction を呼べるようにレンダーごとに ref を更新する。
+  tryInteractionRef.current = tryInteraction;
 
   const replyModalContext = useMemo(() => {
     // expiryTick を deps に含めることで、編集窓が切れた瞬間に

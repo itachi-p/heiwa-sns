@@ -437,14 +437,23 @@ export default function PublicProfilePage() {
     }
   };
 
-  const toggleReplyLikeLocal = useCallback((replyId: number) => {
-    setLikedReplyIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(replyId)) next.delete(replyId);
-      else next.add(replyId);
-      return next;
-    });
-  }, []);
+  // 非ログイン状態での返信「スキ」クリックが silent トグルになっていた
+  // ため認証チェックを追加。本投稿のスキ同様に「ログインが必要」を通知する。
+  const toggleReplyLikeLocal = useCallback(
+    (replyId: number) => {
+      if (!sessionId) {
+        setErrorMessage("スキや投稿にはログインが必要です。");
+        return;
+      }
+      setLikedReplyIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(replyId)) next.delete(replyId);
+        else next.add(replyId);
+        return next;
+      });
+    },
+    [sessionId]
+  );
 
   /**
    * 他者プロフィール画面では返信の編集/削除/下書き変更は不可（自分でないため）。
