@@ -11,7 +11,10 @@
   - 攻撃的投稿の拡散抑制（投稿単位でモデレーションスコア処理）
   - 閲覧者ごとに表示制御できるタイムライン
 - 主導線:
-  - `/` = メインタイムライン（`app/(main)/home/page.tsx`）
+  - `/` = メインタイムライン（`app/(main)/page.tsx`）
+  - `/@{publicId}` = 自分のホーム兼公開プロフィール（`app/(main)/p/[handle]/page.tsx`、自分の場合は `components/home/home-page.tsx` を描画）
+  - `/home/activity` = 自分の投稿への返信一覧
+  - `/settings` = ブックマーク用のエントリ。実体はタイムラインへ戻して設定モーダルを開くだけ
   - 認証は Supabase Auth（Google OAuth / メール）
   - 招待コードを組み込んだ新規登録フロー（`/api/invite-signup`, `/api/invite-bind`）
 
@@ -19,12 +22,23 @@
 
 ### 2.1 タイムライン・投稿体験
 
-- `app/(main)/home/page.tsx`
-  - 投稿一覧表示、投稿/返信、編集、削除、スキ、画像添付
+- `app/(main)/page.tsx`（URL: `/`）
+  - メインタイムライン（全ユーザーの投稿一覧）
+  - 投稿/返信、編集、削除、スキ、画像添付
   - 無限スクロール + 手動「さらに読み込む」
-  - セッション/プロフィール状態に応じた UI ゲート
+  - セッション/プロフィール状態に応じた UI ゲート（`tryInteraction`）
   - モデレーション結果に応じた表示制御（非表示/折りたたみ）
   - 返信ツリー表示（`ReplyThread`）
+- `components/home/home-page.tsx`
+  - 自分のホームとして `/@{publicId}` 配下で描画される。独立した route ファイルは持たない
+  - 自分の投稿/返信のみ表示。投稿/返信操作、編集、削除、画像添付
+  - 自分の投稿/返信には「スキ」ボタンを出さない（仕様）
+- 「スキ」の挙動:
+  - 自分自身の投稿/返信にはボタン自体を出さない
+  - 非ログイン/プロフィール未確定時にクリックされた場合は「スキや投稿にはログインが必要です」を通知（タイムラインでは `tryInteraction` モーダル、公開プロフィールでは `errorMessage` バナー）
+- 編集ウィンドウの残り時間表示:
+  - `components/edit-countdown-badge.tsx` が各投稿/返信の編集モーダル内部で独立して 1 秒刻みの再描画を行う
+  - タイムライン全体で setInterval を回す旧実装は廃止済み（再発防止）
 
 ### 2.2 認証・ヘッダー
 
@@ -42,22 +56,26 @@
   - 公開ID未設定ユーザーをモーダルで停止
   - 公開IDは一度設定したら変更不可（API側で再設定拒否）
 - `components/must-change-password-modal.tsx`
-  - パスワード変更必須時の停止（`home/activity` と `home` で利用）
+  - パスワード変更必須時の停止（`/`、`/home/activity`、`/@{publicId}`（自分のホーム）で利用）
 
 ### 2.4 プロフィール・公開導線
 
 - `app/(main)/p/[handle]/page.tsx`
-  - 公開IDベースプロフィール（`/@handle` から middleware rewrite）
-  - 投稿一覧、スキ、返信、プロフィール情報表示
-- `app/(main)/home/[userId]/page.tsx`
-  - 旧 UUID 導線。`public_id` があれば `@handle` へリダイレクト
+  - 公開IDベースプロフィール（`/@handle` は `middleware.ts` で `/p/[handle]` に rewrite）
+  - 閲覧者==所有者の場合は `components/home/home-page.tsx` を描画（自分のホーム）
+  - 閲覧者!=所有者の場合は他者プロフィールビュー（投稿一覧、スキ、返信、プロフィール情報表示）
+  - 非ログイン閲覧者は投稿/返信の「スキ」ボタンに対してログイン要求通知を出す
+- 旧 `/home` ルートおよび `/home/[userId]` ルートは廃止済み
+  - `/home` は `/@{publicId}` に統合、`/home/[userId]` は UUID を URL に露出させないため削除
+  - 自分のホームを開く導線は常に `/@{publicId}`
 
 ### 2.5 アクティビティ
 
-- `app/(main)/home/activity/page.tsx`
+- `app/(main)/home/activity/page.tsx`（URL: `/home/activity`）
   - 自分の投稿への他者返信を時系列表示
   - 閲覧フィルタ設定に連動して非表示/折りたたみ
   - 閲覧後に `activity_last_seen_at` を更新
+  - 元投稿へのリンクは `/@{publicId}?post={postId}` を使い、HomePage 側でスクロール処理する（`/home?post=...` 時代にリダイレクトで `?post=` が失われていた回帰を防ぐ）
 
 ### 2.6 設定
 
@@ -166,15 +184,17 @@
 - 閲覧制御は `moderation_max_score` の生値ではなく `effectiveScoreForViewerToxicityFilter()` を通して判定する
 - タイムライン順は `sortTimelinePosts()` を単一の基準関数にする
 - 公開IDは `normalizePublicId()` + `isValidPublicIdFormat()` を必ず通す
-- 公開プロフィール表示は `public_id` 起点とし、旧 UUID 導線は移行目的でのみ扱う
+- 公開プロフィール表示は `public_id` 起点とする（UUID を URL に露出させないため、旧 UUID 導線は廃止済み）
+- ログアウト時は `app/(main)/layout.tsx` で常に `/` に replace する（`/@{自分のpublicId}` に留まって「前のユーザーの画面を見続けている」錯覚を防ぐため）
 - モデレーション API は外部依存失敗時も継続可能（degraded fallback）にする
 - クライアント保存（localStorage/IDB/sessionStorage）は「表示体験維持」が目的で、DBの真実を置き換えない
 
 ## 8) 既知の構造的注意点（現状把握）
 
-- `app/(main)/home/page.tsx` は責務が非常に大きく、今後の変更時に回帰リスクが高い
+- `components/home/home-page.tsx`（自分のホーム本体、約 2.8k 行）と `app/(main)/page.tsx`（タイムライン本体、約 2.5k 行）はまだ責務が大きく、分割余地あり（`cleanup_audit.md` 参照）
 - モーダル/ゲート（招待・公開ID・パスワード変更）が複数層で重なるため、表示優先度の衝突に注意
 - `timeline-toxicity-filter` の E2E は実データ更新前提のため、実行環境分離が必要
+- `.history/` は VS Code の自動ローカル履歴。`.gitignore` 対象で Git 管理しない
 
 ## 9) 今後の運用ルール（この文書の扱い）
 
