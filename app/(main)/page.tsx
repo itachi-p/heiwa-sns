@@ -16,6 +16,7 @@ import { EditCountdownBadge } from "@/components/edit-countdown-badge";
 import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { setReplyActive } from "@/components/reply-active-bus";
+import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { AppToastPortal } from "@/components/app-toast-portal";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
@@ -1571,6 +1572,12 @@ export default function Home() {
           degradedReason?: string;
         };
         if (!res.ok) {
+          setToast({
+            message:
+              json.error ??
+              "投稿チェックに失敗しました。時間をおいて再試行してください。",
+            tone: "error",
+          });
           setPostSubmitting(false);
           return;
         }
@@ -1593,6 +1600,11 @@ export default function Home() {
         postOverallMax = maxFromApi;
       } catch (err) {
         console.error("moderation error:", err);
+        setToast({
+          message:
+            "投稿チェックに失敗しました。通信状況をご確認のうえ再試行してください。",
+          tone: "error",
+        });
         setPostSubmitting(false);
         return;
       }
@@ -1605,6 +1617,10 @@ export default function Home() {
     }
     const sessionUser = sessionWrap.session?.user;
     if (!sessionUser?.id) {
+      setToast({
+        message: "セッションが切れました。再度ログインしてください。",
+        tone: "error",
+      });
       setPostSubmitting(false);
       return;
     }
@@ -1629,11 +1645,19 @@ export default function Home() {
 
     if (error) {
       console.error("insert error:", error);
+      setToast({
+        message: friendlyClientDbMessage(error.message),
+        tone: "error",
+      });
       setPostSubmitting(false);
       return;
     }
 
     if (!data) {
+      setToast({
+        message: "投稿の保存結果が取得できませんでした。再試行してください。",
+        tone: "error",
+      });
       setPostSubmitting(false);
       return;
     }
@@ -1647,6 +1671,11 @@ export default function Home() {
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
+        setToast({
+          message:
+            "画像のアップロードに失敗しました。形式や容量をご確認ください。",
+          tone: "error",
+        });
         setPostSubmitting(false);
         return;
       }
@@ -1658,6 +1687,10 @@ export default function Home() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", data.id);
+        setToast({
+          message: friendlyClientDbMessage(updErr.message),
+          tone: "error",
+        });
         setPostSubmitting(false);
         return;
       }
@@ -1957,6 +1990,11 @@ export default function Home() {
                         void (async () => {
                           const r = await preparePostImageForUpload(file);
                           if (!r.ok) {
+                            setToast({
+                              message:
+                                "画像の準備に失敗しました。形式や容量をご確認ください。",
+                              tone: "error",
+                            });
                             return;
                           }
                           setComposePostImage({

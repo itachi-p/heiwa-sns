@@ -198,6 +198,7 @@
 - クライアント保存（localStorage/IDB/sessionStorage）は「表示体験維持」が目的で、DBの真実を置き換えない
 - `components/reply-thread.tsx` のドラフト透過は条件付きで早期に空文字へ置換しない（ネストした子返信を編集すると常に空白が降ってきて textarea が空になる回帰の再発防止）。textarea 自体が `editingReplyId === reply.id` のときだけ mount されるので生値透過で正しい
 - インライン返信フォーム（「〇〇に返信」プレースホルダーが出る `bottom-2 z-[56]` の固定フォーム）が開いている間は、`components/reply-active-bus.ts` 経由で `MainBottomNav` を非表示にする。理由：「+」誤押下で新規投稿モーダル（`bottom-20 z-[55]`）がインライン返信フォームと重畳して操作不能になる回帰の再発防止。各描画元（`app/(main)/page.tsx` / `components/home/home-page.tsx` / `app/(main)/p/[handle]/page.tsx`）は `useEffect` で `setReplyActive(inlineReplyPostId != null)` を呼び、unmount／閉時に `false` を投げる契約。layout 側は `useSyncExternalStore` で購読
+- `app/(main)/page.tsx` の `handleSubmit`（新規投稿）の失敗ケースは `setToast({ tone: "error" })` でユーザーに必ず通知する。サイレントに `return` しない（cleanup_audit 旧章 4 の再発防止）。対象: モデレーション API !ok / network catch、セッション失効、posts insert エラー、posts insert 後 data 欠落、画像アップロード失敗、画像メタ update 失敗、画像前処理失敗（`onPick` 内 `!r.ok`）。DB エラー文言は `friendlyClientDbMessage` を通す
 - ニックネームは任意・変更可（旧仕様のデッドカラム `users.nickname_locked` はマイグレーション `20260419120000_users_drop_nickname_locked.sql` で drop 済み）。一方 `public_id` は初回必須・変更不可（API で 409）。DB 層でも `20260419130000_users_public_id_hardening.sql` で形式 CHECK（`^[a-z0-9._-]{5,20}$`）と不変性トリガー（NOT NULL 以降の UPDATE を `raise exception`）を設置済み = 直叩き update もバイパス不可
 
 ## 8) 既知の構造的注意点（現状把握）
