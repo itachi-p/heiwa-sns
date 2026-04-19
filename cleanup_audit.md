@@ -1,0 +1,137 @@
+# cleanup_audit
+
+`project_master_plan.md` を見直す前段としての作業用メモ。「過去の試行錯誤の残骸」「放置すると混乱を増やしそうなもの」を列挙。
+判断後に反映した項目はこの文書から削除し、全項目が片付いたらこの文書自体を破棄する想定。
+
+---
+
+## 1. 機械検出できる未使用コード
+
+`npx eslint .` の警告（= 消して良い可能性が高い）。
+
+| ファイル:行 | 指摘 | 所見 |
+|---|---|---|
+| `app/(main)/page.tsx:270` | `composeFormError` is assigned a value but never used | かつて UI 表示していた名残。現在は `setToast` に置き換わっている |
+
+---
+
+## 2. Lint で表面化している React 的リスク（既存）
+
+放置するとランタイム挙動不定になり得るもの。
+
+| ファイル:行 | 内容 | リスク |
+|---|---|---|
+| `app/(main)/home/activity/page.tsx:327` | レンダー中に `fetchActivityRef.current` を書き換え | `useEffect` か `useLayoutEffect` へ移す |
+| `components/app-toast-portal.tsx:18` | effect 内で同期 `setState`（mount 検出） | 新 lint ルールで警告。`useSyncExternalStore` か `typeof window !== 'undefined'` チェックで置換可能 |
+| `components/main-bottom-nav.tsx:136` | 同上 | 同上 |
+| `app/(main)/p/[handle]/page.tsx:358` | `any` キャスト | 型が曖昧な supabase レスポンスの型付け要 |
+
+---
+
+## 3. DB マイグレーション（混乱の痕跡）
+
+同日内で drop → restore しているペアが見られ、「指示していないテーブル/カラムがマイグレーションされた」という記憶と整合。
+
+- `20260329100000 backfill_user_interests_from_users_text`
+- `20260329120000 drop_user_interests_use_users_interests`
+- `20260329140000 user_interests_restore_drop_users_interests`
+
+この 3 つは 1 日で drop と restore を両方行っており、どちらが「現在の正」か確定仕様と突き合わせる必要がある。現状のスキーマ自体は最後の restore で戻っているはずなので**今すぐ壊れはしない**が、`user_interests` と `users.interests`（text? jsonb?）の関係は要整理。
+
+他に「drop」「legacy」と付くマイグレーション：
+- `20260404140000 drop_moderation_scores_first_finalize`
+- `20260412100000 users_drop_legacy_toxicity_threshold_columns`
+
+これらは「過去に足して要らなくなったので消した」跡。結果的にクリーンな状態になっているなら問題なし。確認は実 DB の `information_schema` を見るのが確実。
+
+---
+
+## 4. 超大型ファイル
+
+| ファイル | 行数 | コメント |
+|---|---|---|
+| `components/home/home-page.tsx` | 2805 | 自分のホーム本体（`/@{publicId}` で描画）。プロフィール編集 / 招待・パスワードモーダル / 興味ピッカーを別ファイルへ抽出する余地あり |
+| `app/(main)/page.tsx` | 2470 | タイムライン本体。`composeFormError` 等の未使用コード（章 1）含む |
+
+2805 + 2470 = 5275 行が 2 ファイルに集中。1 ファイル 1500 行程度までなら Cursor の回帰リスクも減らせる肌感。
+
+---
+
+## 5. コメント/トースト関連の残骸
+
+### 5.1 「再発防止」系コメント
+
+`再発防止|ゾンビ|旧実装|以前は|過去に誤って` を含むコメントが以下に点在。
+
+- `components/home/home-page.tsx`
+- `components/home/compose-modal.tsx`
+- `components/edit-countdown-badge.tsx`
+- `components/reply-thread.tsx`
+
+「同じバグを再発させないため」目的で入れたものだが、実装を変えるとコメントだけ取り残される危険がある。本当に残すべきもの（例: `スキ` ボタン非表示の根拠）と、今となっては意味を失っているものを一度棚卸しすべき。
+
+### 5.2 トースト位置
+
+`components/app-toast-portal.tsx`:
+- `fixed` + `top-[max(28vh,6.5rem)]` で画面上部寄り
+- `z-[2147483000]` で最前面
+- `max-w-[min(92vw,28rem)]` で幅制限あり
+
+過去に「画面外にはみ出て操作不能」が起きた件、現在の実装では起きにくいが、モーダル（ComposeModal 等）が **top に重なる配置**に変わると同じ問題が再発しうる。「必ず viewport の見える範囲」を担保したいなら `top` ではなく `bottom` + safe-area 基準にする方が安全。
+
+---
+
+## 6. 公開ID（`public_id`）の DB 層 hardening（未対応）
+
+API 層で形式検証 + 初回限定をしているが、`users_update_own` RLS が列単位で制限していないため、認証済みユーザーが Supabase JS から直接 `update({ public_id: ... })` で API をバイパスできる。defense in depth として DB 側に以下を入れたい。
+
+```sql
+-- 形式 CHECK
+alter table public.users
+  add constraint users_public_id_format
+  check (public_id is null or public_id ~ '^[a-z0-9._-]{5,20}$');
+
+-- 不変性トリガー（一度 NOT NULL になったら変更を蹴る）
+create or replace function prevent_public_id_change()
+returns trigger language plpgsql as $$
+begin
+  if old.public_id is not null and new.public_id is distinct from old.public_id then
+    raise exception 'public_id is immutable once set';
+  end if;
+  return new;
+end $$;
+
+create trigger users_public_id_immutable
+before update on public.users
+for each row execute function prevent_public_id_change();
+```
+
+既存データは正規（API で入れたもの）なので非破壊で追加可能。
+
+---
+
+## 7. 死んだコード / カラム
+
+- `components/nickname-required-modal.tsx`: 「ニックネーム必須」仕様を撤回した際に未使用化。どこからも import されていない（grep 0 件）。削除候補
+- `users.nickname_locked` カラム: マイグレーションで定義され値も入っているが、アプリコードからは一切参照されていない（`e2e/reset-lent-invite-user.ts` のみ）。仕様変更（ニックネーム任意）に伴うデッド。column drop 候補
+
+---
+
+## 8. 推奨アクション順序（軽いものから）
+
+1. 章 1 の `composeFormError` 削除（lint 警告 1 件分。機械的で安全）
+2. 章 7 の死コード削除（`nickname-required-modal.tsx`、`users.nickname_locked`）
+3. 章 6 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
+4. 章 2 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
+5. 章 4 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+6. 章 5.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+7. 章 3 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
+
+---
+
+## 9. 本文書の運用
+
+- 実装の真実は `project_master_plan.md` とコードに寄せる方針。本文書の推測は手元で確認してから採用。
+- 片付いた項目は該当セクションごと削除。
+- 新しい「残骸っぽいもの」を見つけたら追記。
+- 新しいチャットを開いた際は、AI に本文書を読み込ませて「次にやるべき軽い項目」を提案させ、完了したら本文書と `project_master_plan.md` を即更新する運用を推奨。
