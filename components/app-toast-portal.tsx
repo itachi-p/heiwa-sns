@@ -10,6 +10,11 @@ type Props = {
 
 /**
  * 下部ナビの上・viewport 基準で固定。親の transform / stacking に巻き込まれないよう body 直下へ描画。
+ *
+ * 位置は `top-[max(28vh,6.5rem)]` 固定。**画面上部に重なるモーダルを新規追加する場合は注意**:
+ * 過去にトーストが画面外に押し出され操作不能になる事故あり。新モーダルが top 領域を覆う場合は
+ * トースト位置を `bottom` + `safe-area-inset-bottom` 基準に切替するか、モーダル側で z-index を
+ * トーストより低く保つこと（参照: cleanup_audit.md 4.2）。
  */
 export function AppToastPortal({ message, tone }: Props) {
   const [mounted, setMounted] = useState(false);
