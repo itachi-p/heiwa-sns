@@ -197,7 +197,7 @@
 - モデレーション API は外部依存失敗時も継続可能（degraded fallback）にする
 - クライアント保存（localStorage/IDB/sessionStorage）は「表示体験維持」が目的で、DBの真実を置き換えない
 - `components/reply-thread.tsx` のドラフト透過は条件付きで早期に空文字へ置換しない（ネストした子返信を編集すると常に空白が降ってきて textarea が空になる回帰の再発防止）。textarea 自体が `editingReplyId === reply.id` のときだけ mount されるので生値透過で正しい
-- ニックネームは任意・変更可（旧仕様のデッドカラム `users.nickname_locked` はマイグレーション `20260419120000_users_drop_nickname_locked.sql` で drop 済み）。一方 `public_id` は初回必須・変更不可（API で 409。**DB 層の CHECK / 不変トリガーは未設置 = 直叩き update で API バイパス可能、別途対応候補**）
+- ニックネームは任意・変更可（旧仕様のデッドカラム `users.nickname_locked` はマイグレーション `20260419120000_users_drop_nickname_locked.sql` で drop 済み）。一方 `public_id` は初回必須・変更不可（API で 409）。DB 層でも `20260419130000_users_public_id_hardening.sql` で形式 CHECK（`^[a-z0-9._-]{5,20}$`）と不変性トリガー（NOT NULL 以降の UPDATE を `raise exception`）を設置済み = 直叩き update もバイパス不可
 
 ## 8) 既知の構造的注意点（現状把握）
 

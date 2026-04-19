@@ -49,36 +49,7 @@
 
 ---
 
-## 4. 公開ID（`public_id`）の DB 層 hardening（未対応）
-
-API 層で形式検証 + 初回限定をしているが、`users_update_own` RLS が列単位で制限していないため、認証済みユーザーが Supabase JS から直接 `update({ public_id: ... })` で API をバイパスできる。defense in depth として DB 側に以下を入れたい。
-
-```sql
--- 形式 CHECK
-alter table public.users
-  add constraint users_public_id_format
-  check (public_id is null or public_id ~ '^[a-z0-9._-]{5,20}$');
-
--- 不変性トリガー（一度 NOT NULL になったら変更を蹴る）
-create or replace function prevent_public_id_change()
-returns trigger language plpgsql as $$
-begin
-  if old.public_id is not null and new.public_id is distinct from old.public_id then
-    raise exception 'public_id is immutable once set';
-  end if;
-  return new;
-end $$;
-
-create trigger users_public_id_immutable
-before update on public.users
-for each row execute function prevent_public_id_change();
-```
-
-既存データは正規（API で入れたもの）なので非破壊で追加可能。
-
----
-
-## 5. setToast 欠落によるサイレントエラー（`app/(main)/page.tsx` `handleSubmit`）
+## 4. setToast 欠落によるサイレントエラー（`app/(main)/page.tsx` `handleSubmit`）
 
 `composeFormError` state 削除の際に判明。以下の失敗ケースはユーザーに何も表示されず silent fail している。本来 `setToast` で通知すべき可能性が高い。挙動変更を伴うため別タスクで判断。
 
@@ -91,17 +62,16 @@ for each row execute function prevent_public_id_change();
 
 ---
 
-## 6. 推奨アクション順序（軽いものから）
+## 5. 推奨アクション順序（軽いものから）
 
-1. 章 4 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
-2. 章 5 の setToast 欠落解消（挙動変更あり・要相談）
-3. 章 2 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
-4. 章 3.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
-5. 章 1 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
+1. 章 4 の setToast 欠落解消（挙動変更あり・要相談）
+2. 章 2 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+3. 章 3.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+4. 章 1 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
 
 ---
 
-## 7. 本文書の運用
+## 6. 本文書の運用
 
 - 実装の真実は `project_master_plan.md` とコードに寄せる方針。本文書の推測は手元で確認してから採用。
 - 片付いた項目は該当セクションごと削除。
