@@ -7,6 +7,7 @@ import { SiteHeader } from "@/components/site-header";
 import {
   ReplyBubbleIcon,
 } from "@/components/reply-composer-modal";
+import { setReplyActive } from "@/components/reply-active-bus";
 import { ReplyThread, type PostReplyRow } from "@/components/reply-thread";
 import { UserAvatar } from "@/components/user-avatar";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
@@ -490,6 +491,13 @@ export default function PublicProfilePage() {
     []
   );
 
+  // インライン返信フォームが開いている間は下部ナビを隠して、
+  // 「+」誤押下による新規投稿モーダルとの重畳を防ぐ。
+  useEffect(() => {
+    setReplyActive(inlineReplyPostId != null);
+    return () => setReplyActive(false);
+  }, [inlineReplyPostId]);
+
   const partitionByPost = useMemo(() => {
     const map: Record<
       number,
@@ -786,7 +794,7 @@ export default function PublicProfilePage() {
             e.preventDefault();
             void handleReplySubmit(inlineReplyPostId);
           }}
-          className="fixed inset-x-2 bottom-16 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg"
+          className="fixed inset-x-2 bottom-2 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] shadow-lg"
         >
           <UserAvatar
             name={viewerNickname}

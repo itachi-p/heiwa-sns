@@ -9,6 +9,7 @@ import { MustChangePasswordModal } from "@/components/must-change-password-modal
 import {
   ReplyBubbleIcon,
 } from "@/components/reply-composer-modal";
+import { setReplyActive } from "@/components/reply-active-bus";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
@@ -1501,6 +1502,13 @@ export default function HomePage() {
     }
   }, [replyComposerPostId, replyModalContext]);
 
+  // インライン返信フォームが開いている間は下部ナビを隠して、
+  // 「+」誤押下による新規投稿モーダルとの重畳を防ぐ。
+  useEffect(() => {
+    setReplyActive(inlineReplyPostId != null);
+    return () => setReplyActive(false);
+  }, [inlineReplyPostId]);
+
   /**
    * 投稿送信ハンドラ。子の `ComposeModal` から本文と画像を受け取る。
    *
@@ -2693,7 +2701,7 @@ export default function HomePage() {
             if (!tryInteraction()) return;
             void handleReplySubmit(inlineReplyPostId);
           }}
-          className="fixed inset-x-2 bottom-16 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-lg"
+          className="fixed inset-x-2 bottom-2 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] shadow-lg"
         >
           <UserAvatar
             name={profileNickname}
