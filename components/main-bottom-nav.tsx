@@ -132,10 +132,7 @@ export function MainBottomNav({
   const [myPublicId, setMyPublicId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!show) {
-      setMyPublicId(null);
-      return;
-    }
+    if (!show) return;
     let cancelled = false;
     const load = async () => {
       const {

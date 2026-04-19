@@ -5,19 +5,7 @@
 
 ---
 
-## 1. Lint で表面化している React 的リスク（既存）
-
-放置するとランタイム挙動不定になり得るもの。
-
-| ファイル:行 | 内容 | リスク |
-|---|---|---|
-| `components/app-toast-portal.tsx:18` | effect 内で同期 `setState`（mount 検出） | 新 lint ルールで警告。`useSyncExternalStore` か `typeof window !== 'undefined'` チェックで置換可能 |
-| `components/main-bottom-nav.tsx:136` | 同上 | 同上 |
-| `app/(main)/p/[handle]/page.tsx:358` | `any` キャスト | 型が曖昧な supabase レスポンスの型付け要 |
-
----
-
-## 2. DB マイグレーション（混乱の痕跡）
+## 1. DB マイグレーション（混乱の痕跡）
 
 同日内で drop → restore しているペアが見られ、「指示していないテーブル/カラムがマイグレーションされた」という記憶と整合。
 
@@ -35,20 +23,20 @@
 
 ---
 
-## 3. 超大型ファイル
+## 2. 超大型ファイル
 
 | ファイル | 行数 | コメント |
 |---|---|---|
-| `components/home/home-page.tsx` | 2805 | 自分のホーム本体（`/@{publicId}` で描画）。プロフィール編集 / 招待・パスワードモーダル / 興味ピッカーを別ファイルへ抽出する余地あり |
-| `app/(main)/page.tsx` | 2446 | タイムライン本体 |
+| `components/home/home-page.tsx` | 2809 | 自分のホーム本体（`/@{publicId}` で描画）。プロフィール編集 / 招待・パスワードモーダル / 興味ピッカーを別ファイルへ抽出する余地あり |
+| `app/(main)/page.tsx` | 2460 | タイムライン本体 |
 
-2805 + 2446 = 5251 行が 2 ファイルに集中。1 ファイル 1500 行程度までなら Cursor の回帰リスクも減らせる肌感。
+依然 5000 行超が 2 ファイルに集中。1 ファイル 1500 行程度までなら Cursor の回帰リスクも減らせる肌感。
 
 ---
 
-## 4. コメント/トースト関連の残骸
+## 3. コメント/トースト関連の残骸
 
-### 4.1 「再発防止」系コメント
+### 3.1 「再発防止」系コメント
 
 `再発防止|ゾンビ|旧実装|以前は|過去に誤って` を含むコメントが以下に点在。
 
@@ -59,18 +47,9 @@
 
 「同じバグを再発させないため」目的で入れたものだが、実装を変えるとコメントだけ取り残される危険がある。本当に残すべきもの（例: `スキ` ボタン非表示の根拠）と、今となっては意味を失っているものを一度棚卸しすべき。
 
-### 4.2 トースト位置
-
-`components/app-toast-portal.tsx`:
-- `fixed` + `top-[max(28vh,6.5rem)]` で画面上部寄り
-- `z-[2147483000]` で最前面
-- `max-w-[min(92vw,28rem)]` で幅制限あり
-
-過去に「画面外にはみ出て操作不能」が起きた件、現在の実装では起きにくいが、モーダル（ComposeModal 等）が **top に重なる配置**に変わると同じ問題が再発しうる。「必ず viewport の見える範囲」を担保したいなら `top` ではなく `bottom` + safe-area 基準にする方が安全。
-
 ---
 
-## 5. 公開ID（`public_id`）の DB 層 hardening（未対応）
+## 4. 公開ID（`public_id`）の DB 層 hardening（未対応）
 
 API 層で形式検証 + 初回限定をしているが、`users_update_own` RLS が列単位で制限していないため、認証済みユーザーが Supabase JS から直接 `update({ public_id: ... })` で API をバイパスできる。defense in depth として DB 側に以下を入れたい。
 
@@ -99,7 +78,7 @@ for each row execute function prevent_public_id_change();
 
 ---
 
-## 6. setToast 欠落によるサイレントエラー（`app/(main)/page.tsx` `handleSubmit`）
+## 5. setToast 欠落によるサイレントエラー（`app/(main)/page.tsx` `handleSubmit`）
 
 `composeFormError` state 削除の際に判明。以下の失敗ケースはユーザーに何も表示されず silent fail している。本来 `setToast` で通知すべき可能性が高い。挙動変更を伴うため別タスクで判断。
 
@@ -112,14 +91,20 @@ for each row execute function prevent_public_id_change();
 
 ---
 
+## 6. UX 判断保留: タイムライン初回表示の前倒し
+
+`fetchPosts` は `setPosts(timelinePosts)` を呼んだ後、返信 + 返信プロフィール + dev スコアの取得が完了するまで `setTimelineLoading(false)` を遅らせている。`finally` の位置を `setPosts` 直後に移すと **投稿本文が ~0.5〜1s 早く** 表示できるが、返信件数が一瞬 0 になる「フラッシュ」が発生する可能性あり。実装するか否かは要相談。
+
+---
+
 ## 7. 推奨アクション順序（軽いものから）
 
-1. 章 5 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
-2. 章 6 の setToast 欠落解消（挙動変更あり・要相談）
-3. 章 3 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
-4. 章 4.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
-5. 章 1 の残 3 件（toast-portal mount 検出 / bottom-nav 同上 / p/[handle] any キャスト）
-6. 章 2 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
+1. 章 4 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
+2. 章 5 の setToast 欠落解消（挙動変更あり・要相談）
+3. 章 6 のタイムライン表示前倒し（UX トレードオフ・要相談）
+4. 章 2 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+5. 章 3.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+6. 章 1 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
 
 ---
 

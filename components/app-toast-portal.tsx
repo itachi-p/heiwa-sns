@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 type Props = {
   message: string;
   tone: "default" | "error";
 };
+
+const subscribeNoop = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
 /**
  * 下部ナビの上・viewport 基準で固定。親の transform / stacking に巻き込まれないよう body 直下へ描画。
@@ -17,11 +21,13 @@ type Props = {
  * トーストより低く保つこと（参照: cleanup_audit.md 4.2）。
  */
 export function AppToastPortal({ message, tone }: Props) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // SSR は false、ハイドレーション直後から true。これでハイドレーションズレなく
+  // クライアント側のみ portal を描く（旧: useEffect + setMounted を新 lint 規則対応）。
+  const mounted = useSyncExternalStore(
+    subscribeNoop,
+    getClientSnapshot,
+    getServerSnapshot
+  );
 
   if (!mounted || typeof document === "undefined" || !message.trim()) {
     return null;

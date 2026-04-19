@@ -5,7 +5,7 @@ export function previewPostSnippet(text: string | null | undefined): string {
 
   const lines = normalized.split("\n");
   const firstTwo = lines.slice(0, 2);
-  let out = firstTwo.join("\n");
+  const out = firstTwo.join("\n");
   const hasMoreLines = lines.length > 2;
   const maxLen = 160;
   if (out.length > maxLen) {

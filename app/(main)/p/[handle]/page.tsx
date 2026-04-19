@@ -355,9 +355,19 @@ export default function PublicProfilePage() {
     setReplyScoresById((prev) => {
       const next = { ...prev };
       for (const r of rows) {
-        const dev = (r as { moderation_dev_scores?: any }).moderation_dev_scores;
+        const dev = (
+          r as {
+            moderation_dev_scores?: {
+              first?: Record<string, number> | null;
+              second?: Record<string, number> | null;
+            } | null;
+          }
+        ).moderation_dev_scores;
         if (dev?.first || dev?.second) {
-          next[r.id] = { first: dev.first ?? undefined, second: dev.second ?? undefined };
+          next[r.id] = {
+            first: dev.first ?? undefined,
+            second: dev.second ?? undefined,
+          };
         }
       }
       return next;
