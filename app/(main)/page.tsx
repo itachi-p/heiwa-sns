@@ -39,6 +39,8 @@ import {
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   effectiveScoreForViewerToxicityFilter,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  parseToxicityFilterLevel,
+  parseToxicityOverThresholdBehavior,
   thresholdForLevel,
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
@@ -1094,10 +1096,12 @@ export default function Home() {
 
     void (async () => {
       await ensurePublicUserRow(user);
+      // 1 round trip: fold profile + toxicity preferences into a single select
+      // to keep the timeline-blocking critical path short.
       const { data, error } = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label, invite_onboarding_completed, public_id"
+          "nickname, avatar_url, avatar_placeholder_hex, must_change_password, invite_label, invite_onboarding_completed, public_id, toxicity_filter_level, toxicity_over_threshold_behavior"
         )
         .eq("id", userId)
         .maybeSingle();
@@ -1125,9 +1129,17 @@ export default function Home() {
         (data as { avatar_placeholder_hex?: string | null } | null)
           ?.avatar_placeholder_hex ?? null
       );
-      setToxicityFilterLevel(await fetchToxicityFilterLevel(supabase, userId));
+      setToxicityFilterLevel(
+        parseToxicityFilterLevel(
+          (data as { toxicity_filter_level?: string | null } | null)
+            ?.toxicity_filter_level
+        )
+      );
       setToxicityOverThresholdBehavior(
-        await fetchToxicityOverThresholdBehavior(supabase, userId)
+        parseToxicityOverThresholdBehavior(
+          (data as { toxicity_over_threshold_behavior?: string | null } | null)
+            ?.toxicity_over_threshold_behavior
+        )
       );
       loadedProfileUserIdRef.current = userId;
       setProfileReady(true);
