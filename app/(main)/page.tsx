@@ -765,7 +765,9 @@ export default function Home() {
   };
 
   const fetchPostsRef = useRef(fetchPosts);
-  fetchPostsRef.current = fetchPosts;
+  useEffect(() => {
+    fetchPostsRef.current = fetchPosts;
+  });
   const timelineLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
