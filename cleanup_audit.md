@@ -5,17 +5,7 @@
 
 ---
 
-## 1. 機械検出できる未使用コード
-
-`npx eslint .` の警告（= 消して良い可能性が高い）。
-
-| ファイル:行 | 指摘 | 所見 |
-|---|---|---|
-| `app/(main)/page.tsx:270` | `composeFormError` is assigned a value but never used | かつて UI 表示していた名残。現在は `setToast` に置き換わっている |
-
----
-
-## 2. Lint で表面化している React 的リスク（既存）
+## 1. Lint で表面化している React 的リスク（既存）
 
 放置するとランタイム挙動不定になり得るもの。
 
@@ -28,7 +18,7 @@
 
 ---
 
-## 3. DB マイグレーション（混乱の痕跡）
+## 2. DB マイグレーション（混乱の痕跡）
 
 同日内で drop → restore しているペアが見られ、「指示していないテーブル/カラムがマイグレーションされた」という記憶と整合。
 
@@ -46,20 +36,20 @@
 
 ---
 
-## 4. 超大型ファイル
+## 3. 超大型ファイル
 
 | ファイル | 行数 | コメント |
 |---|---|---|
 | `components/home/home-page.tsx` | 2805 | 自分のホーム本体（`/@{publicId}` で描画）。プロフィール編集 / 招待・パスワードモーダル / 興味ピッカーを別ファイルへ抽出する余地あり |
-| `app/(main)/page.tsx` | 2470 | タイムライン本体。`composeFormError` 等の未使用コード（章 1）含む |
+| `app/(main)/page.tsx` | 2446 | タイムライン本体 |
 
-2805 + 2470 = 5275 行が 2 ファイルに集中。1 ファイル 1500 行程度までなら Cursor の回帰リスクも減らせる肌感。
+2805 + 2446 = 5251 行が 2 ファイルに集中。1 ファイル 1500 行程度までなら Cursor の回帰リスクも減らせる肌感。
 
 ---
 
-## 5. コメント/トースト関連の残骸
+## 4. コメント/トースト関連の残骸
 
-### 5.1 「再発防止」系コメント
+### 4.1 「再発防止」系コメント
 
 `再発防止|ゾンビ|旧実装|以前は|過去に誤って` を含むコメントが以下に点在。
 
@@ -70,7 +60,7 @@
 
 「同じバグを再発させないため」目的で入れたものだが、実装を変えるとコメントだけ取り残される危険がある。本当に残すべきもの（例: `スキ` ボタン非表示の根拠）と、今となっては意味を失っているものを一度棚卸しすべき。
 
-### 5.2 トースト位置
+### 4.2 トースト位置
 
 `components/app-toast-portal.tsx`:
 - `fixed` + `top-[max(28vh,6.5rem)]` で画面上部寄り
@@ -81,7 +71,7 @@
 
 ---
 
-## 6. 公開ID（`public_id`）の DB 層 hardening（未対応）
+## 5. 公開ID（`public_id`）の DB 層 hardening（未対応）
 
 API 層で形式検証 + 初回限定をしているが、`users_update_own` RLS が列単位で制限していないため、認証済みユーザーが Supabase JS から直接 `update({ public_id: ... })` で API をバイパスできる。defense in depth として DB 側に以下を入れたい。
 
@@ -110,14 +100,27 @@ for each row execute function prevent_public_id_change();
 
 ---
 
+## 6. setToast 欠落によるサイレントエラー（`app/(main)/page.tsx` `handleSubmit`）
+
+`composeFormError` state 削除の際に判明。以下の失敗ケースはユーザーに何も表示されず silent fail している。本来 `setToast` で通知すべき可能性が高い。挙動変更を伴うため別タスクで判断。
+
+- セッション失効（`!sessionUser?.id`）
+- モデレーション API エラー（`!res.ok` / `catch`）
+- 投稿 `insert` DB エラー
+- 画像アップロード失敗（`!up.ok`）
+- 画像メタ update 失敗（`updErr`）
+- 画像前処理失敗（`onPick` 内 `!r.ok`）
+
+---
+
 ## 7. 推奨アクション順序（軽いものから）
 
-1. 章 1 の `composeFormError` 削除（lint 警告 1 件分。機械的で安全）
-2. 章 6 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
-3. 章 2 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
-4. 章 4 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
-5. 章 5.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
-6. 章 3 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
+1. 章 1 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
+2. 章 5 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
+3. 章 6 の setToast 欠落解消（挙動変更あり・要相談）
+4. 章 3 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+5. 章 4.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+6. 章 2 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
 
 ---
 

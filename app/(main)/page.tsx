@@ -22,7 +22,6 @@ import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
 import { ReplyThread } from "@/components/reply-thread";
 import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
-import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { createClient } from "@/lib/supabase/client";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { normalizePerspectiveScores } from "@/lib/perspective-labels";
@@ -266,8 +265,6 @@ export default function Home() {
     null
   );
   const [composeOpen, setComposeOpen] = useState(false);
-  /** 投稿フローティングフォーム内のみ（背後のタイムラインに出さない） */
-  const [composeFormError, setComposeFormError] = useState<string | null>(null);
   const [postSubmitting, setPostSubmitting] = useState(false);
   const [composePostImage, setComposePostImage] =
     useState<PreparedPostImage | null>(null);
@@ -1503,33 +1500,27 @@ export default function Home() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) {
-      const msg = "ログインしてください。";
-      setComposeFormError(msg);
       return;
     }
     if (needsNickname || needsPasswordChange || needsInviteOnboarding)
       return;
     const textContent = input.trim();
     if (!textContent && !composePostImage) {
-      setComposeFormError("投稿内容を入力してください。");
       setToast({ message: "投稿内容を入力してください。", tone: "error" });
       return;
     }
     if (!textContent && composePostImage) {
       const msg = "画像を添付する場合は本文を入力してください。";
-      setComposeFormError(msg);
       setToast({ message: msg, tone: "error" });
       return;
     }
     if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
       const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
-      setComposeFormError(msg);
       setToast({ message: msg, tone: "error" });
       return;
     }
 
     setPostSubmitting(true);
-    setComposeFormError(null);
 
     let postOverallMax = 0;
     let postScores: Record<string, number> = {};
@@ -1559,8 +1550,6 @@ export default function Home() {
           degradedReason?: string;
         };
         if (!res.ok) {
-          const msg = json?.error ?? "AI判定に失敗しました。";
-          setComposeFormError(msg);
           setPostSubmitting(false);
           return;
         }
@@ -1583,8 +1572,6 @@ export default function Home() {
         postOverallMax = maxFromApi;
       } catch (err) {
         console.error("moderation error:", err);
-        const msg = "AI判定に失敗しました。";
-        setComposeFormError(msg);
         setPostSubmitting(false);
         return;
       }
@@ -1597,9 +1584,6 @@ export default function Home() {
     }
     const sessionUser = sessionWrap.session?.user;
     if (!sessionUser?.id) {
-      setComposeFormError(
-        "ログインの有効期限が切れている可能性があります。ログインし直してからお試しください。"
-      );
       setPostSubmitting(false);
       return;
     }
@@ -1624,7 +1608,6 @@ export default function Home() {
 
     if (error) {
       console.error("insert error:", error);
-      setComposeFormError(friendlyClientDbMessage(error.message));
       setPostSubmitting(false);
       return;
     }
@@ -1643,7 +1626,6 @@ export default function Home() {
       );
       if (!up.ok) {
         await supabase.from("posts").delete().eq("id", data.id);
-        setComposeFormError(up.message);
         setPostSubmitting(false);
         return;
       }
@@ -1655,8 +1637,6 @@ export default function Home() {
       if (updErr) {
         await removePostImageIfAny(supabase, up.path);
         await supabase.from("posts").delete().eq("id", data.id);
-        const msg = friendlyClientDbMessage(updErr.message);
-        setComposeFormError(msg);
         setPostSubmitting(false);
         return;
       }
@@ -1669,7 +1649,6 @@ export default function Home() {
         [data.id]: { first: postScores },
       }));
     }
-    setComposeFormError(null);
     setInput("");
     setComposePostImage(null);
     setComposeOpen(false);
@@ -1950,10 +1929,8 @@ export default function Home() {
                         void (async () => {
                           const r = await preparePostImageForUpload(file);
                           if (!r.ok) {
-                            setComposeFormError(r.message);
                             return;
                           }
-                          setComposeFormError(null);
                           setComposePostImage({
                             blob: r.blob,
                             contentType: r.contentType,
@@ -1996,7 +1973,6 @@ export default function Home() {
                       disabled={postSubmitting}
                       onClick={() => {
                         setComposeOpen(false);
-                        setComposeFormError(null);
                         setInput("");
                         setComposePostImage(null);
                       }}
