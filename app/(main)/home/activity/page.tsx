@@ -14,12 +14,10 @@ import { SiteHeader } from "@/components/site-header";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import {
-  fetchToxicityFilterLevel,
-  fetchToxicityOverThresholdBehavior,
-} from "@/lib/timeline-threshold";
-import {
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   effectiveScoreForViewerToxicityFilter,
+  parseToxicityFilterLevel,
+  parseToxicityOverThresholdBehavior,
   thresholdForLevel,
   type ToxicityOverThresholdBehavior,
 } from "@/lib/toxicity-filter-level";
@@ -156,7 +154,7 @@ export default function HomeActivityPage() {
     const { data: me, error: meErr } = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, public_id, must_change_password, invite_label"
+        "nickname, avatar_url, avatar_placeholder_hex, public_id, must_change_password, invite_label, toxicity_filter_level, toxicity_over_threshold_behavior"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -184,10 +182,14 @@ export default function HomeActivityPage() {
       typeof meRow?.invite_label === "string" ? meRow.invite_label : null
     );
 
-    const [level, behavior] = await Promise.all([
-      fetchToxicityFilterLevel(supabase, uid),
-      fetchToxicityOverThresholdBehavior(supabase, uid),
-    ]);
+    const level = parseToxicityFilterLevel(
+      (me as { toxicity_filter_level?: string | null } | null)
+        ?.toxicity_filter_level
+    );
+    const behavior = parseToxicityOverThresholdBehavior(
+      (me as { toxicity_over_threshold_behavior?: string | null } | null)
+        ?.toxicity_over_threshold_behavior
+    );
     setToxicityThreshold(thresholdForLevel(level));
     setOverBehavior(behavior);
     setExpanded(new Set());

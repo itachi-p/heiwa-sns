@@ -16,10 +16,6 @@ import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
 import {
-  fetchToxicityFilterLevel,
-  fetchToxicityOverThresholdBehavior,
-} from "@/lib/timeline-threshold";
-import {
   POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
   REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
 } from "@/lib/visibility-notice";
@@ -27,6 +23,8 @@ import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
   HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD,
+  parseToxicityFilterLevel,
+  parseToxicityOverThresholdBehavior,
   thresholdForLevel,
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
@@ -497,7 +495,9 @@ export default function HomePage() {
   };
 
   const reloadPostsAndRepliesRef = useRef(reloadPostsAndReplies);
-  reloadPostsAndRepliesRef.current = reloadPostsAndReplies;
+  useEffect(() => {
+    reloadPostsAndRepliesRef.current = reloadPostsAndReplies;
+  });
 
   const fetchOwnPosts = async (uid: string) => {
     const stillThisViewer = () => homeSessionUserIdRef.current === uid;
@@ -505,7 +505,7 @@ export default function HomePage() {
     const profileRes = await supabase
       .from("users")
       .select(
-        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id"
+        "nickname, avatar_url, avatar_placeholder_hex, bio, interest_custom_creations_count, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id, toxicity_filter_level, toxicity_over_threshold_behavior"
       )
       .eq("id", uid)
       .maybeSingle();
@@ -521,6 +521,8 @@ export default function HomePage() {
       invite_onboarding_completed?: boolean | null;
       profile_external_url?: string | null;
       public_id?: string | null;
+      toxicity_filter_level?: string | null;
+      toxicity_over_threshold_behavior?: string | null;
     };
 
     let profile: ProfileRow | null = profileRes.data as ProfileRow | null;
@@ -528,7 +530,7 @@ export default function HomePage() {
       const fallback = await supabase
         .from("users")
         .select(
-          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id"
+          "nickname, avatar_url, avatar_placeholder_hex, bio, must_change_password, invite_label, invite_onboarding_completed, profile_external_url, public_id, toxicity_filter_level, toxicity_over_threshold_behavior"
         )
         .eq("id", uid)
         .maybeSingle();
@@ -539,10 +541,10 @@ export default function HomePage() {
       profile = fallback.data as ProfileRow | null;
     }
 
-    const [filterLevel, overBehavior] = await Promise.all([
-      fetchToxicityFilterLevel(supabase, uid),
-      fetchToxicityOverThresholdBehavior(supabase, uid),
-    ]);
+    const filterLevel = parseToxicityFilterLevel(profile?.toxicity_filter_level);
+    const overBehavior = parseToxicityOverThresholdBehavior(
+      profile?.toxicity_over_threshold_behavior
+    );
 
     // プリセットだけでなく、誰かが登録した is_preset=false も共有マスタなので検索対象に含める
     const catalogRes = await supabase
@@ -642,7 +644,9 @@ export default function HomePage() {
   };
 
   const fetchOwnPostsRef = useRef(fetchOwnPosts);
-  fetchOwnPostsRef.current = fetchOwnPosts;
+  useEffect(() => {
+    fetchOwnPostsRef.current = fetchOwnPosts;
+  });
 
   useEffect(() => {
     if (!userId) return;
