@@ -324,6 +324,12 @@ function ReplyItemRaw({
       {kids.length > 0 ? (
         <ul className="mt-2 space-y-2">
           {kids.map((c) => (
+            // editReplyDraft は editingReplyId とは無関係に「常に生の値」を末端まで透過させる。
+            // 過去にここで `editingReplyId === c.id ? editReplyDraft : ""` と早期に空文字で
+            // 潰す最適化が入っていたが、上位の ReplyThread でも同じ条件で潰しているため、
+            // ネストした子返信を編集すると常に "" が降ってきて textarea が空白になるバグを
+            // 起こしていた（再発防止）。textarea は `editingReplyId === reply.id` のときだけ
+            // mount されるので生値を渡しても表示には影響しない。
             <ReplyItem
               key={c.id}
               reply={c}
@@ -332,7 +338,7 @@ function ReplyItemRaw({
               userId={userId}
               canInteract={canInteract}
               editingReplyId={editingReplyId}
-              editReplyDraft={editingReplyId === c.id ? editReplyDraft : ""}
+              editReplyDraft={editReplyDraft}
               replyEditSaving={replyEditSaving}
               replyVisibilityThreshold={replyVisibilityThreshold}
               overThresholdBehavior={overThresholdBehavior}
@@ -393,9 +399,7 @@ function ReplyThreadRaw(props: ThreadProps) {
           userId={props.userId}
           canInteract={props.canInteract}
           editingReplyId={props.editingReplyId}
-          editReplyDraft={
-            props.editingReplyId === r.id ? props.editReplyDraft : ""
-          }
+          editReplyDraft={props.editReplyDraft}
           replyEditSaving={props.replyEditSaving}
           replyVisibilityThreshold={props.replyVisibilityThreshold}
           overThresholdBehavior={props.overThresholdBehavior}
