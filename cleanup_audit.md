@@ -11,7 +11,6 @@
 
 | ファイル:行 | 内容 | リスク |
 |---|---|---|
-| `app/(main)/home/activity/page.tsx:327` | レンダー中に `fetchActivityRef.current` を書き換え | `useEffect` か `useLayoutEffect` へ移す |
 | `components/app-toast-portal.tsx:18` | effect 内で同期 `setState`（mount 検出） | 新 lint ルールで警告。`useSyncExternalStore` か `typeof window !== 'undefined'` チェックで置換可能 |
 | `components/main-bottom-nav.tsx:136` | 同上 | 同上 |
 | `app/(main)/p/[handle]/page.tsx:358` | `any` キャスト | 型が曖昧な supabase レスポンスの型付け要 |
@@ -115,11 +114,11 @@ for each row execute function prevent_public_id_change();
 
 ## 7. 推奨アクション順序（軽いものから）
 
-1. 章 1 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
-2. 章 5 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
-3. 章 6 の setToast 欠落解消（挙動変更あり・要相談）
-4. 章 3 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
-5. 章 4.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+1. 章 5 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
+2. 章 6 の setToast 欠落解消（挙動変更あり・要相談）
+3. 章 3 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+4. 章 4.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+5. 章 1 の残 3 件（toast-portal mount 検出 / bottom-nav 同上 / p/[handle] any キャスト）
 6. 章 2 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
 
 ---

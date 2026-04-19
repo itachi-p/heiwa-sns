@@ -324,7 +324,9 @@ export default function HomeActivityPage() {
   };
 
   const fetchActivityRef = useRef(fetchActivity);
-  fetchActivityRef.current = fetchActivity;
+  useEffect(() => {
+    fetchActivityRef.current = fetchActivity;
+  });
 
   useEffect(() => {
     let cancelled = false;
