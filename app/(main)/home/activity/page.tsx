@@ -49,6 +49,13 @@ type ActivityRow = {
     avatar_placeholder_hex?: string | null;
     public_id?: string | null;
   } | null;
+  /**
+   * ルート投稿のオーナー（= 元投稿の作者）の public_id。
+   * 「リプ」画面のリンク先 `/@{owner}?post={postId}` を作るのに使う。
+   * 自分のルート投稿に対する返信なら自分の public_id、
+   * 他人のルート投稿に付けた自分の返信への返信なら相手の public_id。
+   */
+  postOwnerPublicId?: string | null;
 };
 
 function normalizeJoinedPost(
@@ -185,31 +192,86 @@ export default function HomeActivityPage() {
     setOverBehavior(behavior);
     setExpanded(new Set());
 
-    const { data, error } = await supabase
+    // 「リプ」画面の表示対象は「自分が直接の親となる返信」だけに限定する。
+    // - A: ルート投稿（parent_reply_id IS NULL）で、その投稿主が自分
+    // - B: 親が返信の場合、親返信の投稿者が自分
+    // 旧仕様（自分のルート投稿配下の全返信を表示）から変更。
+    // Supabase での自己参照 join が壊れやすいため、A と B を別クエリで取って結合する。
+    const replySelect =
+      "id, post_id, user_id, content, pending_content, created_at, moderation_max_score, posts!inner(id,user_id,content,pending_content)";
+
+    const respA = await supabase
       .from("post_replies")
-      .select(
-        "id, post_id, user_id, content, pending_content, created_at, moderation_max_score, posts!inner(id,user_id,content,pending_content)"
-      )
+      .select(replySelect)
+      .is("parent_reply_id", null)
       .eq("posts.user_id", uid)
       .neq("user_id", uid)
       .order("created_at", { ascending: false })
       .limit(100);
-    if (error) {
-      setErrorMessage(error.message);
+    if (respA.error) {
+      setErrorMessage(respA.error.message);
       setLoading(false);
       return;
     }
 
-    const rows = (data ?? []) as Array<
-      ActivityRow & { posts?: { id: number; user_id: string; content: string }[] }
-    >;
-    const mapped: ActivityRow[] = rows.map((r) => ({
+    const myRepliesResp = await supabase
+      .from("post_replies")
+      .select("id")
+      .eq("user_id", uid);
+    if (myRepliesResp.error) {
+      setErrorMessage(myRepliesResp.error.message);
+      setLoading(false);
+      return;
+    }
+    const myReplyIds = (myRepliesResp.data ?? [])
+      .map((r) => Number((r as { id: number }).id))
+      .filter((n) => Number.isFinite(n));
+
+    let respBData: unknown[] = [];
+    if (myReplyIds.length > 0) {
+      const respB = await supabase
+        .from("post_replies")
+        .select(replySelect)
+        .in("parent_reply_id", myReplyIds)
+        .neq("user_id", uid)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (respB.error) {
+        setErrorMessage(respB.error.message);
+        setLoading(false);
+        return;
+      }
+      respBData = respB.data ?? [];
+    }
+
+    type RawRow = ActivityRow & {
+      posts?: { id: number; user_id: string; content: string }[];
+    };
+    const mergedById = new Map<number, RawRow>();
+    for (const row of (respA.data ?? []) as RawRow[]) mergedById.set(row.id, row);
+    for (const row of respBData as RawRow[]) mergedById.set(row.id, row);
+    const merged = [...mergedById.values()]
+      .sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return tb - ta;
+      })
+      .slice(0, 100);
+
+    const mapped: ActivityRow[] = merged.map((r) => ({
       ...r,
       post: normalizeJoinedPost(r),
     }));
 
+    // プロフィール取得対象は「返信した人」+「ルート投稿のオーナー」両方。
+    // ルート投稿のオーナーは元投稿へのリンク先 (`/@{owner}?post=X`) を組み立てるのに必要。
     const authorIds = [
-      ...new Set(mapped.map((r) => r.user_id).filter((id): id is string => Boolean(id))),
+      ...new Set(
+        [
+          ...mapped.map((r) => r.user_id),
+          ...mapped.map((r) => r.post?.user_id ?? null),
+        ].filter((id): id is string => Boolean(id))
+      ),
     ];
     const profileMap = new Map<
       string,
@@ -248,6 +310,8 @@ export default function HomeActivityPage() {
       mapped.map((r) => ({
         ...r,
         users: profileMap.get(r.user_id) ?? null,
+        postOwnerPublicId:
+          (r.post?.user_id && profileMap.get(r.post.user_id)?.public_id) || null,
       }))
     );
     setErrorMessage(null);
@@ -399,11 +463,16 @@ export default function HomeActivityPage() {
                         </time>
                       </div>
                       <Link
-                        href={
-                          viewerPublicId
-                            ? `/@${viewerPublicId}?post=${row.post_id}`
-                            : "/"
-                        }
+                        href={(() => {
+                          // 元投稿のオーナー（自分 or 他人）のプロフィールに飛ばす。
+                          // 自分のルート投稿への返信なら自分の /@{publicId}、
+                          // 他人のルート投稿配下で自分の返信に付いた返信なら相手の /@{publicId}。
+                          const ownerPid =
+                            row.postOwnerPublicId || viewerPublicId;
+                          return ownerPid
+                            ? `/@${ownerPid}?post=${row.post_id}`
+                            : "/";
+                        })()}
                         className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"
                       >
                         <p className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-normal leading-snug text-gray-600">
