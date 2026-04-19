@@ -652,6 +652,12 @@ export default function Home() {
     );
 
     setPosts(timelinePosts);
+    // 投稿本文を先に描画させるため、返信・スコアの取得を待たずにローディング解除。
+    // 返信件数などは取得完了後にリアクティブに更新される（初回のみ一瞬 0 件相当の表示に
+    // なりうるが、2 回目以降は sessionStorage snapshot により即座に揃う）。
+    if (!append && !quiet) {
+      setTimelineLoading(false);
+    }
 
     const postIds = timelinePosts.map((p) => p.id);
     let replyRowsFlat: PostReply[] = [];

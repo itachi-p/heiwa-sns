@@ -181,7 +181,6 @@
 
 ## 6) テスト構成（現行）
 
-- `e2e/smoke.spec.ts`: 最小表示確認
 - `e2e/unit-timeline-sort.spec.ts`: タイムラインソート純関数検証
 - `e2e/timeline-toxicity-filter.spec.ts`: 2ユーザー + service_role でフィルタ挙動検証
 - `e2e/invite-flow.spec.ts`: 招待フロー確認
