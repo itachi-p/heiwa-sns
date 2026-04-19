@@ -110,26 +110,18 @@ for each row execute function prevent_public_id_change();
 
 ---
 
-## 7. 死んだコード / カラム
-
-- `components/nickname-required-modal.tsx`: 「ニックネーム必須」仕様を撤回した際に未使用化。どこからも import されていない（grep 0 件）。削除候補
-- `users.nickname_locked` カラム: マイグレーションで定義され値も入っているが、アプリコードからは一切参照されていない（`e2e/reset-lent-invite-user.ts` のみ）。仕様変更（ニックネーム任意）に伴うデッド。column drop 候補
-
----
-
-## 8. 推奨アクション順序（軽いものから）
+## 7. 推奨アクション順序（軽いものから）
 
 1. 章 1 の `composeFormError` 削除（lint 警告 1 件分。機械的で安全）
-2. 章 7 の死コード削除（`nickname-required-modal.tsx`、`users.nickname_locked`）
-3. 章 6 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
-4. 章 2 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
-5. 章 4 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
-6. 章 5.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
-7. 章 3 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
+2. 章 6 の `public_id` DB hardening（マイグレーション 1 ファイル追加）
+3. 章 2 の `app/(main)/home/activity/page.tsx:327` ref.current 書き換えを `useEffect` に移す
+4. 章 4 `home-page.tsx` の分割: プロフィール編集モーダル、招待 / パスワード変更モーダル、興味ピッカーを別ファイルへ
+5. 章 5.1 再発防止コメントの棚卸し: コードで不変条件を表現する方向（関数名 / 型 / テスト）に寄せて、コメントは最小限に
+6. 章 3 DB スキーマ整理: 実 DB の `information_schema.columns` を一度ダンプし、`project_master_plan.md` のデータモデル節（現状ほぼ未記載）に反映
 
 ---
 
-## 9. 本文書の運用
+## 8. 本文書の運用
 
 - 実装の真実は `project_master_plan.md` とコードに寄せる方針。本文書の推測は手元で確認してから採用。
 - 片付いた項目は該当セクションごと削除。

@@ -59,7 +59,6 @@ export async function resetLentInviteUserAfterE2e(): Promise<void> {
     .update({
       invite_onboarding_completed: false,
       must_change_password: true,
-      nickname_locked: false,
       invite_label: null,
     })
     .eq("id", userId);
