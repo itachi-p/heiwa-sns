@@ -471,10 +471,12 @@ export default function HomeActivityPage() {
                           // 元投稿のオーナー（自分 or 他人）のプロフィールに飛ばす。
                           // 自分のルート投稿への返信なら自分の /@{publicId}、
                           // 他人のルート投稿配下で自分の返信に付いた返信なら相手の /@{publicId}。
+                          // reply={row.id} を付けて、着地先でリプ欄を自動展開し
+                          // 該当の返信（ネストの奥でも）まで一発スクロールできるようにする。
                           const ownerPid =
                             row.postOwnerPublicId || viewerPublicId;
                           return ownerPid
-                            ? `/@${ownerPid}?post=${row.post_id}`
+                            ? `/@${ownerPid}?post=${row.post_id}&reply=${row.id}`
                             : "/";
                         })()}
                         className="mt-2 block rounded-md border border-gray-100 bg-gray-50/90 px-2.5 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-100"

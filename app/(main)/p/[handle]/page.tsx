@@ -86,6 +86,12 @@ export default function PublicProfilePage() {
   const [repliesByPost, setRepliesByPost] = useState<
     Record<number, PostReplyRow[]>
   >({});
+  // 吹き出しアイコンの色判定用（リプ欄を開く前の表示に使う）。
+  // 実際の返信データは toggleReplyPanel→fetchRepliesForPost で遅延取得するが、
+  // それまでアイコンが白のまま 0 件表示になる回帰を防ぐため、件数だけ一括 prefetch する。
+  const [replyCountByPost, setReplyCountByPost] = useState<
+    Record<number, number>
+  >({});
   const [replyParentReplyId, setReplyParentReplyId] = useState<number | null>(
     null
   );
@@ -269,6 +275,76 @@ export default function PublicProfilePage() {
       cancelled = true;
     };
   }, [sessionId, posts]);
+
+  // 吹き出しアイコンの色を正しくするため、返信件数だけ一括 prefetch する。
+  // 本体データは toggleReplyPanel→fetchRepliesForPost が必要なときに取る（既存挙動を維持）。
+  useEffect(() => {
+    const postIds = posts.map((p) => p.id);
+    if (postIds.length === 0) {
+      setReplyCountByPost({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("post_replies")
+        .select("post_id")
+        .in("post_id", postIds);
+      if (cancelled) return;
+      if (error) return;
+      const counts: Record<number, number> = {};
+      for (const r of (data ?? []) as { post_id: number }[]) {
+        counts[r.post_id] = (counts[r.post_id] ?? 0) + 1;
+      }
+      setReplyCountByPost(counts);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [posts]);
+
+  // 「リプ」画面からのディープリンク `/@{handle}?post=X&reply=Y` に対応。
+  // ルート投稿までスクロール → リプ欄を自動展開 → 該当返信まで追加スクロール。
+  useEffect(() => {
+    if (posts.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const rawPost = params.get("post");
+    if (!rawPost) return;
+    const postId = Number(rawPost);
+    if (!Number.isFinite(postId)) return;
+    const el = document.getElementById(`home-post-${postId}`);
+    if (!el) return;
+    const rawReply = params.get("reply");
+    const replyId =
+      rawReply && Number.isFinite(Number(rawReply)) ? Number(rawReply) : null;
+    let cancelled = false;
+    void (async () => {
+      if (replyId != null) {
+        setOpenedReplyPosts((prev) =>
+          prev.has(postId) ? prev : new Set([...prev, postId])
+        );
+        if (repliesByPost[postId] == null) {
+          await fetchRepliesForPost(postId);
+        }
+      }
+      if (cancelled) return;
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (replyId != null) {
+          window.setTimeout(() => {
+            const rel = document.getElementById(`reply-${replyId}`);
+            if (rel) rel.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 250);
+        }
+      });
+    })();
+    window.history.replaceState(null, "", window.location.pathname);
+    return () => {
+      cancelled = true;
+    };
+    // posts の再読込み時にのみ発火させる（URL 引数は mount 時に一度処理すれば十分）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posts]);
 
   const handleLike = async (postId: number) => {
     if (!sessionId) return;
@@ -605,6 +681,7 @@ export default function PublicProfilePage() {
                     return (
                       <li
                         key={post.id}
+                        id={`home-post-${post.id}`}
                         className="break-words rounded-lg border border-gray-200 bg-white p-4"
                       >
                         <div className="mb-2 flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800">
@@ -693,7 +770,9 @@ export default function PublicProfilePage() {
                             }}
                             className={[
                               "inline-flex items-center justify-center rounded-md border p-2 hover:opacity-90",
-                              (repliesByPost[post.id]?.length ?? 0) > 0
+                              (repliesByPost[post.id]?.length ??
+                                replyCountByPost[post.id] ??
+                                0) > 0
                                 ? "border-sky-300 bg-sky-100 text-sky-800"
                                 : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50",
                             ].join(" ")}
@@ -702,7 +781,9 @@ export default function PublicProfilePage() {
                           >
                             <ReplyBubbleIcon
                               className={
-                                (repliesByPost[post.id]?.length ?? 0) > 0
+                                (repliesByPost[post.id]?.length ??
+                                  replyCountByPost[post.id] ??
+                                  0) > 0
                                   ? "text-sky-700"
                                   : "text-gray-600"
                               }

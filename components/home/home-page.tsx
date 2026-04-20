@@ -712,8 +712,27 @@ export default function HomePage() {
     if (!Number.isFinite(id)) return;
     const el = document.getElementById(`home-post-${id}`);
     if (!el) return;
+    // ?reply=Y が付いている場合は、
+    //  1) 該当ルート投稿のリプ欄を自動展開し
+    //  2) 返信 DOM（id="reply-{id}"）までスクロール
+    // の 2 段階に拡張する。「リプ」画面からのディープリンク用。
+    const rawReply = params.get("reply");
+    const replyId =
+      rawReply && Number.isFinite(Number(rawReply)) ? Number(rawReply) : null;
+    if (replyId != null) {
+      setOpenedReplyPosts((prev) =>
+        prev.has(id) ? prev : new Set([...prev, id])
+      );
+    }
     requestAnimationFrame(() => {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (replyId != null) {
+        // リプ欄（ReplyThread）の mount を待つため 2 フレーム + 短い遅延。
+        window.setTimeout(() => {
+          const rel = document.getElementById(`reply-${replyId}`);
+          if (rel) rel.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 250);
+      }
     });
     // HomePage は /home と /@{publicId} の両方から描画されるため、
     // スクロール後の URL クリーンアップはハードコードせず現在のパスへ戻す。

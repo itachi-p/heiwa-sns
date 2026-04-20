@@ -141,6 +141,7 @@ function ReplyItemRaw({
   const hasChildren = kids.length > 0;
   return (
     <li
+      id={`reply-${reply.id}`}
       className={[
         "relative rounded-md bg-gray-50/80 px-2 py-2",
         depth > 0 ? "ml-1 border-l-2 border-gray-200 pl-3" : "",

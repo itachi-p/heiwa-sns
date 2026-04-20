@@ -80,9 +80,14 @@
 - 実装は自己参照 join を避けるため A と B を 2 クエリで取得し、id でマージ→`created_at` 降順→上限 100 件
 - 閲覧フィルタ設定に連動して非表示/折りたたみ
 - 閲覧後に `activity_last_seen_at` を更新
-- 元投稿へのリンクは「ルート投稿のオーナー」の `public_id` を使って `/@{owner}?post={postId}` に飛ばす
-  - 自分のルート投稿配下なら `/@{自分のpublicId}?post=X`（HomePage 側でスクロール）
-  - 他人のルート投稿配下で自分の返信に付いた返信なら `/@{相手のpublicId}?post=X`
+- 元投稿へのリンクは「ルート投稿のオーナー」の `public_id` を使って `/@{owner}?post={postId}&reply={replyId}` に飛ばす
+  - 自分のルート投稿配下なら `/@{自分のpublicId}?post=X&reply=Y`
+  - 他人のルート投稿配下で自分の返信に付いた返信なら `/@{相手のpublicId}?post=X&reply=Y`
+  - 着地先（`components/home/home-page.tsx` と `app/(main)/p/[handle]/page.tsx` 非 owner 側）は、
+    ルート投稿 `#home-post-{X}` にスクロール → `openedReplyPosts` へ post id を追加してリプ欄を自動展開 →
+    返信 DOM `#reply-{Y}`（`components/reply-thread.tsx` の `<li>` に付与）へ追加スクロール、の 3 段を実施する
+  - `app/(main)/p/[handle]/page.tsx` 非 owner 側は返信本体を遅延取得しているため、`fetchRepliesForPost` を await してから `reply-{Y}` スクロールを発火
+  - 吹き出しアイコンの色（返信 1 件以上で sky 系に点灯）は、`p/[handle]/page.tsx` 非 owner 側では `post_replies.select("post_id").in(...)` を一括で投げて `replyCountByPost` に件数だけキャッシュし、リプ欄未展開でも正しく点灯させる（開いた瞬間に初めて色が付く回帰の再発防止）
 - このアプリは外部通知を出さない設計のため、「リプ」画面が事実上の「あなたへの返信通知」位置づけ
   - 関連する固定文言は出さないが、表示の意味づけは「自分宛のリプライ一覧」と理解すること
 
