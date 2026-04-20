@@ -208,7 +208,7 @@
 
 ## 8) 既知の構造的注意点（現状把握）
 
-- `components/home/home-page.tsx`（自分のホーム本体、約 2.8k 行）と `app/(main)/page.tsx`（タイムライン本体、約 2.5k 行）はまだ責務が大きく、分割余地あり（`cleanup_audit.md` 参照）
+- `components/home/home-page.tsx`（自分のホーム本体、約 2.8k 行）と `app/(main)/page.tsx`（タイムライン本体、約 2.5k 行）はまだ責務が大きく、分割余地あり（GitHub Issue #1）
 - モーダル/ゲート（招待・公開ID・パスワード変更）が複数層で重なるため、表示優先度の衝突に注意
 - `timeline-toxicity-filter` の E2E は実データ更新前提のため、実行環境分離が必要
 - `.history/` は VS Code の自動ローカル履歴。`.gitignore` 対象で Git 管理しない
