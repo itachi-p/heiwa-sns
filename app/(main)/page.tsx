@@ -26,6 +26,13 @@ import {
   loadRepliesForPosts,
   loadTimelinePostsPage,
 } from "@/lib/timeline-fetch";
+import {
+  deleteTimelinePost,
+  deleteTimelineReply,
+  saveTimelinePostEdit,
+  saveTimelineReplyEdit,
+  toggleTimelineLike,
+} from "@/lib/timeline-mutations";
 import { useSecondModerationLoop } from "@/hooks/use-second-moderation-loop";
 import {
   type TimelinePost as Post,
@@ -44,16 +51,12 @@ import {
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
-import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import {
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
-import {
-  removePostImageIfAny,
-  type PreparedPostImage,
-} from "@/lib/post-image-storage";
+import { type PreparedPostImage } from "@/lib/post-image-storage";
 import {
   POST_DEV_SCORES_KEY,
   REPLY_DEV_SCORES_KEY,
@@ -73,8 +76,6 @@ import {
 import {
   loadPostIdsPendingSecondModeration,
   loadReplyIdsPendingSecondModeration,
-  markPostNeedsSecondModeration,
-  markReplyNeedsSecondModeration,
   removePostNeedsSecondModeration,
   removeReplyNeedsSecondModeration,
 } from "@/lib/pending-second-moderation";
@@ -797,18 +798,14 @@ export default function Home() {
 
   const handleDeleteReply = async (replyId: number) => {
     if (!userId) return;
-    if (!window.confirm("この返信を削除しますか？")) return;
-    setErrorMessage(null);
-    const { error } = await supabase
-      .from("post_replies")
-      .delete()
-      .eq("id", replyId);
-    if (error) {
-      setErrorMessage(error.message);
-      return;
-    }
-    if (editingReplyId === replyId) setEditingReplyId(null);
-    await fetchPosts({ quiet: true });
+    await deleteTimelineReply({
+      replyId,
+      editingReplyId,
+      supabase,
+      setErrorMessage,
+      setEditingReplyId,
+      refetchPosts: () => fetchPosts({ quiet: true }),
+    });
   };
 
   const toggleReplyPanel = (postId: number) => {
@@ -822,40 +819,17 @@ export default function Home() {
 
   const handleSaveReplyEdit = async (replyId: number) => {
     if (!userId) return;
-    const content = editReplyDraft.trim();
-    if (!content) {
-      setToast({
-        message: "本文を入力してください。",
-        tone: "error",
-      });
-      return;
-    }
-    if (content.length > POST_AND_REPLY_MAX_CHARS) {
-      setToast({
-        message: `返信は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
-        tone: "error",
-      });
-      return;
-    }
-    setReplyEditSaving(true);
-    setErrorMessage(null);
-    const { error } = await supabase
-      .from("post_replies")
-      .update({ pending_content: content })
-      .eq("id", replyId)
-      .eq("user_id", userId);
-    setReplyEditSaving(false);
-    if (error) {
-      setToast({ message: error.message, tone: "error" });
-      return;
-    }
-    setEditingReplyId(null);
-    markReplyNeedsSecondModeration(replyId);
-    setToast({
-      message: "編集を保存しました。15分後に反映されます。",
-      tone: "default",
+    await saveTimelineReplyEdit({
+      replyId,
+      userId,
+      editReplyDraft,
+      supabase,
+      setToast,
+      setErrorMessage,
+      setReplyEditSaving,
+      setEditingReplyId,
+      refetchPosts: () => fetchPosts({ quiet: true }),
     });
-    await fetchPosts({ quiet: true });
   };
 
   const handleDeletePost = async (
@@ -863,77 +837,36 @@ export default function Home() {
     imageStoragePath?: string | null
   ) => {
     if (!userId) return;
-    if (!window.confirm("この投稿を削除しますか？")) return;
-    setErrorMessage(null);
-    await removePostImageIfAny(supabase, imageStoragePath);
-    const { error } = await supabase
-      .from("posts")
-      .delete()
-      .eq("id", postId)
-      .eq("user_id", userId);
-    if (error) {
-      setErrorMessage(error.message);
-      return;
-    }
-    if (editingPostId === postId) setEditingPostId(null);
-    await fetchPosts({ quiet: true });
+    await deleteTimelinePost({
+      postId,
+      imageStoragePath,
+      userId,
+      editingPostId,
+      supabase,
+      setErrorMessage,
+      setEditingPostId,
+      refetchPosts: () => fetchPosts({ quiet: true }),
+    });
   };
 
   const handleSavePostEdit = async (postId: number) => {
-    if (postEditSaving) return;
     if (!userId) {
       setToast({ message: "ログインしてください。", tone: "error" });
       return;
     }
-    const content = editDraft.trim();
-    const existing = posts.find((p) => p.id === postId);
-    const hasImage = Boolean(existing?.image_storage_path?.trim());
-    if (!content) {
-      setToast({
-        message: hasImage
-          ? "投稿には本文が必要です"
-          : "本文を入力してください。",
-        tone: "error",
-      });
-      return;
-    }
-    if (content.length > POST_AND_REPLY_MAX_CHARS) {
-      setToast({
-        message: `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`,
-        tone: "error",
-      });
-      return;
-    }
-    setPostEditSaving(true);
-    setErrorMessage(null);
-    let error: { message: string } | null = null;
-    try {
-      const res = await supabase
-        .from("posts")
-        .update({ pending_content: content })
-        .eq("id", postId)
-        .eq("user_id", userId);
-      error = res.error;
-    } catch {
-      setPostEditSaving(false);
-      setToast({
-        message: "通信エラーが発生しました。もう一度お試しください。",
-        tone: "error",
-      });
-      return;
-    }
-    setPostEditSaving(false);
-    if (error) {
-      setToast({ message: error.message, tone: "error" });
-      return;
-    }
-    setEditingPostId(null);
-    markPostNeedsSecondModeration(postId);
-    setToast({
-      message: "編集を保存しました。15分後に反映されます。",
-      tone: "default",
+    await saveTimelinePostEdit({
+      postId,
+      userId,
+      editDraft,
+      posts,
+      postEditSaving,
+      supabase,
+      setToast,
+      setErrorMessage,
+      setPostEditSaving,
+      setEditingPostId,
+      refetchPosts: () => fetchPosts({ quiet: true }),
     });
-    await fetchPosts({ quiet: true });
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -963,60 +896,16 @@ export default function Home() {
       setErrorMessage("ログインしてください。");
       return;
     }
-
-    const liked = likedPostIds.has(postId);
-
-    if (liked) {
-      const { error } = await supabase
-        .from("likes")
-        .delete()
-        .eq("user_id", userId)
-        .eq("post_id", postId);
-
-      if (error) {
-        console.error("unlike error:", error);
-        setErrorMessage(error.message);
-        return;
-      }
-
-      setErrorMessage(null);
-      setLikedPostIds((prev) => {
-        const next = new Set(prev);
-        next.delete(postId);
-        return next;
-      });
-      return;
-    }
-
-    const { error } = await supabase.from("likes").upsert(
-      { user_id: userId, post_id: postId },
-      { onConflict: "user_id,post_id" }
-    );
-
-    if (error) {
-      console.error("like error:", error);
-      setErrorMessage(error.message);
-      return;
-    }
-
-    const authorId = posts.find((p) => p.id === postId)?.user_id;
-    if (authorId && authorId !== userId) {
-      const { error: affErr } = await supabase.rpc(
-        "apply_user_affinity_on_like",
-        { p_liker: userId, p_author: authorId }
-      );
-      if (affErr) {
-        console.warn("user_affinity rpc:", affErr.message);
-      }
-    }
-
-    setErrorMessage(null);
-    setLikedPostIds((prev) => {
-      const next = new Set(prev);
-      next.add(postId);
-      return next;
+    // 一覧を再 fetch しないのは旧実装と同じ（スクロール先頭戻り防止）。
+    await toggleTimelineLike({
+      postId,
+      userId,
+      likedPostIds,
+      posts,
+      supabase,
+      setErrorMessage,
+      setLikedPostIds,
     });
-    // 一覧を再 fetch しない（スクロールが先頭に戻るのを防ぐ）。アンスキと同様。
   };
 
   /**
