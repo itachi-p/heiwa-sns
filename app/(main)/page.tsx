@@ -22,6 +22,7 @@ import { TimelinePostCard } from "@/components/timeline/post-card";
 import { createClient } from "@/lib/supabase/client";
 import { submitTimelinePost } from "@/lib/timeline-create-post";
 import { submitTimelineReply } from "@/lib/timeline-submit-reply";
+import { useSecondModerationLoop } from "@/hooks/use-second-moderation-loop";
 import {
   type TimelinePost as Post,
   type TimelinePostReply as PostReply,
@@ -63,16 +64,13 @@ import {
   persistDevScoresToLocalStorage,
 } from "@/lib/dev-scores-local-storage";
 import { buildDevScoresByIdFromRows } from "@/lib/moderation-dev-scores-db";
-import { persistModerationDevScores } from "@/lib/persist-moderation-dev-scores-client";
 import {
   idbLoadPostDevScores,
   idbLoadReplyDevScores,
   idbSavePostDevScores,
   idbSaveReplyDevScores,
 } from "@/lib/moderation-scores-indexeddb";
-import { isPastInitialEditWindow } from "@/lib/second-moderation-timing";
 import {
-  fetchPerspectiveScoresForText,
   loadPostIdsPendingSecondModeration,
   loadReplyIdsPendingSecondModeration,
   markPostNeedsSecondModeration,
@@ -785,152 +783,7 @@ export default function Home() {
   }, [authReady, hasPendingContent]);
 
   /** 本文確定後かつ編集窓終了後、確定本文で再採点し 2 行目を DB（moderation_dev_scores）へ保存 */
-  useEffect(() => {
-    if (!authReady) return;
-    let cancelled = false;
-
-    void (async () => {
-      for (const postId of loadPostIdsPendingSecondModeration()) {
-        if (cancelled) return;
-        const post = posts.find((p) => p.id === postId);
-        if (!post) {
-          removePostNeedsSecondModeration(postId);
-          continue;
-        }
-        if (post.pending_content?.trim()) continue;
-
-        if (
-          !isPastInitialEditWindow(post.created_at)
-        ) {
-          continue;
-        }
-
-        const prev = postScoresByIdRef.current;
-        const existingSecond = prev[postId]?.second;
-        if (existingSecond && Object.keys(existingSecond).length > 0) {
-          const busyKey = `p:${postId}`;
-          if (secondModerationBusyRef.current.has(busyKey)) continue;
-          secondModerationBusyRef.current.add(busyKey);
-          try {
-            const persistRes = await persistModerationDevScores({
-              postId,
-              patch: { second: existingSecond },
-            });
-            if (persistRes.ok) removePostNeedsSecondModeration(postId);
-          } catch (e) {
-            console.warn("persist second post:", e);
-          } finally {
-            secondModerationBusyRef.current.delete(busyKey);
-          }
-          continue;
-        }
-
-        const busyKey = `p:${postId}`;
-        if (secondModerationBusyRef.current.has(busyKey)) continue;
-        secondModerationBusyRef.current.add(busyKey);
-        try {
-          const text = (post.content ?? "").trim();
-          if (!text) {
-            removePostNeedsSecondModeration(postId);
-            continue;
-          }
-          const scores = await fetchPerspectiveScoresForText(text);
-          if (cancelled) return;
-          if (Object.keys(scores).length === 0) {
-            removePostNeedsSecondModeration(postId);
-            continue;
-          }
-          setPostScoresById((p) => {
-            if (p[postId]?.second) return p;
-            const row = p[postId] ?? {};
-            return { ...p, [postId]: { ...row, second: scores } };
-          });
-          const persistRes = await persistModerationDevScores({
-            postId,
-            patch: { second: scores },
-          });
-          if (persistRes.ok) removePostNeedsSecondModeration(postId);
-        } catch (e) {
-          console.warn("second moderation row:", e);
-        } finally {
-          secondModerationBusyRef.current.delete(busyKey);
-        }
-      }
-
-      for (const replyId of loadReplyIdsPendingSecondModeration()) {
-        if (cancelled) return;
-        const reply = Object.values(repliesByPost)
-          .flat()
-          .find((r) => r.id === replyId);
-        if (!reply) {
-          removeReplyNeedsSecondModeration(replyId);
-          continue;
-        }
-        if (reply.pending_content?.trim()) continue;
-
-        if (
-          !isPastInitialEditWindow(reply.created_at)
-        ) {
-          continue;
-        }
-
-        const rprev = replyScoresByIdRef.current;
-        const rExistingSecond = rprev[replyId]?.second;
-        if (rExistingSecond && Object.keys(rExistingSecond).length > 0) {
-          const busyKey = `r:${replyId}`;
-          if (secondModerationBusyRef.current.has(busyKey)) continue;
-          secondModerationBusyRef.current.add(busyKey);
-          try {
-            const persistRes = await persistModerationDevScores({
-              replyId,
-              patch: { second: rExistingSecond },
-            });
-            if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
-          } catch (e) {
-            console.warn("persist second reply:", e);
-          } finally {
-            secondModerationBusyRef.current.delete(busyKey);
-          }
-          continue;
-        }
-
-        const busyKey = `r:${replyId}`;
-        if (secondModerationBusyRef.current.has(busyKey)) continue;
-        secondModerationBusyRef.current.add(busyKey);
-        try {
-          const text = (reply.content ?? "").trim();
-          if (!text) {
-            removeReplyNeedsSecondModeration(replyId);
-            continue;
-          }
-          const scores = await fetchPerspectiveScoresForText(text);
-          if (cancelled) return;
-          if (Object.keys(scores).length === 0) {
-            removeReplyNeedsSecondModeration(replyId);
-            continue;
-          }
-          setReplyScoresById((p) => {
-            if (p[replyId]?.second) return p;
-            const row = p[replyId] ?? {};
-            return { ...p, [replyId]: { ...row, second: scores } };
-          });
-          const persistRes = await persistModerationDevScores({
-            replyId,
-            patch: { second: scores },
-          });
-          if (persistRes.ok) removeReplyNeedsSecondModeration(replyId);
-        } catch (e) {
-          console.warn("second moderation row (reply):", e);
-        } finally {
-          secondModerationBusyRef.current.delete(busyKey);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
+  useSecondModerationLoop({
     authReady,
     posts,
     repliesByPost,
@@ -938,7 +791,12 @@ export default function Home() {
     replyScoresById,
     userId,
     expiryTick,
-  ]);
+    postScoresByIdRef,
+    replyScoresByIdRef,
+    busyRef: secondModerationBusyRef,
+    setPostScoresById,
+    setReplyScoresById,
+  });
 
   const fetchLikes = async (uid: string) => {
     const { data, error } = await supabase
