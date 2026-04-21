@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { memo, useState } from "react";
+import { memo, useState } from "react";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { EditCountdownBadge } from "@/components/edit-countdown-badge";
 import { ReplyBubbleIcon } from "@/components/reply-composer-modal";
@@ -12,59 +12,22 @@ import {
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
+import { renderTextWithLinks } from "@/lib/render-text-with-links";
+import {
+  displayTimelineName as displayName,
+  type TimelinePostReply,
+} from "@/lib/timeline-types";
 import {
   effectiveScoreForViewerToxicityFilter,
   type ToxicityOverThresholdBehavior,
 } from "@/lib/toxicity-filter-level";
 
-export type PostReplyRow = {
-  id: number;
-  post_id: number;
-  user_id: string;
-  content: string;
-  pending_content?: string | null;
-  created_at?: string;
-  parent_reply_id?: number | null;
-  /** DB のみ。5指標はクライアントの replyScoresById */
-  moderation_max_score?: number;
-  users?: {
-    nickname: string | null;
-    avatar_url?: string | null;
-    avatar_placeholder_hex?: string | null;
-    public_id?: string | null;
-  } | null;
-};
-
-function displayName(
-  nickname: string | null | undefined,
-  publicId: string | null | undefined
-): string {
-  const nick = (nickname ?? "").trim();
-  if (nick) return nick;
-  const pid = (publicId ?? "").trim();
-  return pid || "（未設定）";
-}
-
-function renderTextWithLinks(text: string) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const isUrl = /^https?:\/\/[^\s]+$/;
-  return text.split(urlRegex).map((part, idx) => {
-    if (isUrl.test(part)) {
-      return (
-        <a
-          key={`${part}-${idx}`}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-        >
-          {part}
-        </a>
-      );
-    }
-    return <React.Fragment key={`${part}-${idx}`}>{part}</React.Fragment>;
-  });
-}
+/**
+ * `TimelinePostReply` の別名。既存呼び出し元（page.tsx / home-page.tsx /
+ * p/[handle]/page.tsx など）が `PostReplyRow` 名前で参照しているため、
+ * 互換目的で alias re-export する。新規コードでは `TimelinePostReply` を推奨。
+ */
+export type PostReplyRow = TimelinePostReply;
 
 type ItemProps = {
   reply: PostReplyRow;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { SiteHeader } from "@/components/site-header";
@@ -12,6 +12,7 @@ import { ReplyThread, type PostReplyRow } from "@/components/reply-thread";
 import { UserAvatar } from "@/components/user-avatar";
 import { ModerationCompactRow } from "@/components/moderation-compact-row";
 import { createClient } from "@/lib/supabase/client";
+import { renderTextWithLinks } from "@/lib/render-text-with-links";
 import type { InterestPick } from "@/lib/interests";
 import { getPostImagePublicUrl } from "@/lib/post-image-storage";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
@@ -29,27 +30,6 @@ type Post = {
   image_storage_path?: string | null;
   moderation_dev_scores?: { first?: Record<string, number>; second?: Record<string, number> } | null;
 };
-
-function renderTextWithLinks(text: string) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const isUrl = /^https?:\/\/[^\s]+$/;
-  return text.split(urlRegex).map((part, idx) => {
-    if (isUrl.test(part)) {
-      return (
-        <a
-          key={`${part}-${idx}`}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-        >
-          {part}
-        </a>
-      );
-    }
-    return <React.Fragment key={`${part}-${idx}`}>{part}</React.Fragment>;
-  });
-}
 
 export default function PublicProfilePage() {
   const params = useParams();

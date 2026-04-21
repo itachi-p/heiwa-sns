@@ -1,6 +1,14 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PostgrestError, User } from "@supabase/supabase-js";
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { EditCountdownBadge } from "@/components/edit-countdown-badge";
@@ -16,6 +24,12 @@ import { UserAvatar } from "@/components/user-avatar";
 import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { createClient } from "@/lib/supabase/client";
 import { pickAvatarPlaceholderHex } from "@/lib/avatar-placeholder";
+import { renderTextWithLinks } from "@/lib/render-text-with-links";
+import {
+  displayTimelineName as displayName,
+  type TimelinePost as Post,
+  type TimelinePostReply as PostReply,
+} from "@/lib/timeline-types";
 import {
   POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
   REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
@@ -94,71 +108,8 @@ import {
 const supabase = createClient();
 const RELATION_PENALTY_MIN_SCORE = 0.2;
 
-type Post = {
-  id: number;
-  content: string;
-  pending_content?: string | null;
-  created_at?: string;
-  user_id?: string;
-  moderation_max_score?: number;
-  moderation_dev_scores?: unknown;
-  image_storage_path?: string | null;
-  users?: {
-    nickname: string | null;
-    avatar_url?: string | null;
-    avatar_placeholder_hex?: string | null;
-    public_id?: string | null;
-  } | null;
-};
-
-type PostReply = {
-  id: number;
-  post_id: number;
-  user_id: string;
-  content: string;
-  pending_content?: string | null;
-  created_at?: string;
-  parent_reply_id?: number | null;
-  moderation_max_score?: number;
-  moderation_dev_scores?: unknown;
-  users?: {
-    nickname: string | null;
-    avatar_url?: string | null;
-    avatar_placeholder_hex?: string | null;
-    public_id?: string | null;
-  } | null;
-};
-
-function renderTextWithLinks(text: string) {
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const isUrl = /^https?:\/\/[^\s]+$/;
-  return text.split(urlRegex).map((part, idx) => {
-    if (isUrl.test(part)) {
-      return (
-        <a
-          key={`${part}-${idx}`}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-        >
-          {part}
-        </a>
-      );
-    }
-    return <React.Fragment key={`${part}-${idx}`}>{part}</React.Fragment>;
-  });
-}
-
-function displayName(
-  nickname: string | null | undefined,
-  publicId: string | null | undefined
-): string {
-  const nick = (nickname ?? "").trim();
-  if (nick) return nick;
-  const pid = (publicId ?? "").trim();
-  return pid || "（未設定）";
-}
+// Post / PostReply / renderTextWithLinks / displayName は
+// lib/timeline-types.ts と lib/render-text-with-links.tsx に集約済み（#4）。
 
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
@@ -1681,7 +1632,7 @@ export default function HomePage() {
     return true;
   };
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!userId) return;
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1729,7 +1680,7 @@ export default function HomePage() {
     e.target.value = "";
   };
 
-  const handleProfileSave = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleProfileSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!userId) return;
 
