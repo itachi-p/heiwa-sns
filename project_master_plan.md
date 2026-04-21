@@ -208,7 +208,17 @@
 
 ## 8) 既知の構造的注意点（現状把握）
 
-- `components/home/home-page.tsx`（自分のホーム本体、約 2.8k 行）と `app/(main)/page.tsx`（タイムライン本体、約 2.5k 行）はまだ責務が大きく、分割余地あり（GitHub Issue #1）
+- `components/home/home-page.tsx`（自分のホーム本体、約 2.8k 行）はまだ責務が大きく、分割余地あり（GitHub Issue #1）
+- `app/(main)/page.tsx`（タイムライン本体）は GitHub Issue #4 で半減済（2512 → 1241 行 / -50.6%、`feature/split-page-tsx-issue-4` ブランチで 6 フェーズに分割コミット）。抽出先は以下:
+  - `components/timeline/post-card.tsx`（各投稿カードの JSX）
+  - `components/timeline/compose-post-form.tsx`（新規投稿フォーム）
+  - `components/timeline/inline-reply-form.tsx`（下部インライン返信フォーム）
+  - `lib/timeline-types.ts` / `lib/render-text-with-links.tsx`（投稿関連型・URL 自動リンク。`home-page.tsx` / `reply-thread.tsx` / `p/[handle]/page.tsx` からも参照する共通ユーティリティ）
+  - `lib/timeline-fetch.ts`（`loadTimelinePostsPage` / `loadRepliesForPosts` : posts + プロフィール + relation penalty + affinity + toxicity filter + sort / 返信と返信者プロフィールの一括取得）
+  - `lib/timeline-create-post.ts`（`submitTimelinePost` : 新規投稿）
+  - `lib/timeline-submit-reply.ts`（`submitTimelineReply` : 返信送信 + `reply_toxic_events`）
+  - `lib/timeline-mutations.ts`（編集 pending 化 / 削除 / Like トグル）
+  - `hooks/use-second-moderation-loop.ts`（本文確定後の 2 回目採点 + DB 永続化ループ）
 - モーダル/ゲート（招待・公開ID・パスワード変更）が複数層で重なるため、表示優先度の衝突に注意
 - `timeline-toxicity-filter` の E2E は実データ更新前提のため、実行環境分離が必要
 - `.history/` は VS Code の自動ローカル履歴。`.gitignore` 対象で Git 管理しない
