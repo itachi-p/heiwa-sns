@@ -9,11 +9,7 @@ import React, {
   useState,
   type FormEvent,
 } from "react";
-import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
-import { AutosizeTextarea } from "@/components/autosize-textarea";
-import { EditCountdownBadge } from "@/components/edit-countdown-badge";
-import { ImageAttachIconButton } from "@/components/image-attach-icon-button";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { setReplyActive } from "@/components/reply-active-bus";
 import { friendlyClientDbMessage } from "@/lib/client-db-error";
@@ -21,12 +17,11 @@ import { AppToastPortal } from "@/components/app-toast-portal";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
 import { SiteHeader } from "@/components/site-header";
+import { ComposePostForm } from "@/components/timeline/compose-post-form";
+import { InlineReplyForm } from "@/components/timeline/inline-reply-form";
 import { TimelinePostCard } from "@/components/timeline/post-card";
-import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
-import { renderTextWithLinks } from "@/lib/render-text-with-links";
 import {
-  displayTimelineName as displayName,
   type TimelinePost as Post,
   type TimelinePostReply as PostReply,
   type TimelineToastState as ToastState,
@@ -54,15 +49,12 @@ import {
 } from "@/lib/toxicity-filter-level";
 import { POST_AND_REPLY_MAX_CHARS } from "@/lib/compose-text-limits";
 import {
-  canEditOwnPost,
   getEditRemainingMs,
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
 import { sortTimelinePosts } from "@/lib/timeline-sort";
 import {
-  getPostImagePublicUrl,
-  preparePostImageForUpload,
   removePostImageIfAny,
   type PreparedPostImage,
   uploadPostImage,
@@ -1902,89 +1894,17 @@ export default function Home() {
         {authReady && (!(userId && !profileReady) || posts.length > 0) ? (
           <>
             {canInteract && composeOpen ? (
-              <div className="touch-manipulation fixed inset-x-4 bottom-20 z-[55] md:inset-x-auto md:right-6 md:w-[34rem]">
-                <form
-                  onSubmit={handleSubmit}
-                  className="touch-manipulation flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
-                >
-                  <div className="flex items-end gap-2">
-                    <AutosizeTextarea
-                      ref={composeTextareaRef}
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      placeholder="いまどうしてる？"
-                      maxRows={12}
-                      maxLength={POST_AND_REPLY_MAX_CHARS}
-                      disabled={postSubmitting}
-                      autoComplete="off"
-                      enterKeyHint="send"
-                      className="min-h-[2.75rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base leading-snug outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-                    />
-                    <ImageAttachIconButton
-                      disabled={postSubmitting}
-                      onPick={(file) => {
-                        void (async () => {
-                          const r = await preparePostImageForUpload(file);
-                          if (!r.ok) {
-                            setToast({
-                              message:
-                                "画像の準備に失敗しました。形式や容量をご確認ください。",
-                              tone: "error",
-                            });
-                            return;
-                          }
-                          setComposePostImage({
-                            blob: r.blob,
-                            contentType: r.contentType,
-                            ext: r.ext,
-                          });
-                        })();
-                      }}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {composeImagePreviewUrl ? (
-                      <div className="flex flex-wrap items-end gap-2">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={composeImagePreviewUrl}
-                          alt=""
-                          className="max-h-40 rounded border border-gray-200 object-contain"
-                        />
-                        <button
-                          type="button"
-                          disabled={postSubmitting}
-                          onClick={() => setComposePostImage(null)}
-                          className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          画像を外す
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="submit"
-                      disabled={postSubmitting}
-                      className="rounded-md bg-blue-600 px-3 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {postSubmitting ? "投稿中…" : "投稿"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={postSubmitting}
-                      onClick={() => {
-                        setComposeOpen(false);
-                        setInput("");
-                        setComposePostImage(null);
-                      }}
-                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </form>
-              </div>
+              <ComposePostForm
+                input={input}
+                setInput={setInput}
+                composeImagePreviewUrl={composeImagePreviewUrl}
+                setComposePostImage={setComposePostImage}
+                postSubmitting={postSubmitting}
+                composeTextareaRef={composeTextareaRef}
+                setComposeOpen={setComposeOpen}
+                setToast={setToast}
+                onSubmit={handleSubmit}
+              />
             ) : null}
 
             <section>
@@ -2084,65 +2004,20 @@ export default function Home() {
       ) : null}
 
       {canInteract && inlineReplyPostId != null ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!tryInteraction()) return;
-            void handleReplySubmit(inlineReplyPostId);
-          }}
-          className="fixed inset-x-2 bottom-2 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] shadow-lg"
-        >
-          <UserAvatar
-            name={profileNickname}
-            avatarUrl={profileAvatarUrl}
-            placeholderHex={profilePlaceholderHex}
-            size="sm"
-          />
-          <AutosizeTextarea
-            value={replyDrafts[inlineReplyPostId] ?? ""}
-            onChange={(e) =>
-              setReplyDrafts((prev) => ({
-                ...prev,
-                [inlineReplyPostId]: e.target.value,
-              }))
-            }
-            placeholder={(() => {
-              const post = posts.find((p) => p.id === inlineReplyPostId);
-              const targetReply =
-                replyParentReplyId != null
-                  ? (repliesByPost[inlineReplyPostId] ?? []).find(
-                      (r) => r.id === replyParentReplyId
-                    )
-                  : null;
-              const n = targetReply
-                ? displayName(
-                    targetReply.users?.nickname,
-                    targetReply.users?.public_id
-                  )
-                : displayName(post?.users?.nickname, post?.users?.public_id);
-              const pid =
-                targetReply?.users?.public_id ??
-                post?.users?.public_id ??
-                "ID未設定";
-              return `${n}（${pid}）に返信`;
-            })()}
-            maxRows={4}
-            maxLength={POST_AND_REPLY_MAX_CHARS}
-            disabled={replySubmittingPostId === inlineReplyPostId}
-            className="min-h-[2.2rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-          />
-          {(replyDrafts[inlineReplyPostId] ?? "").trim().length > 0 ? (
-            <button
-              type="submit"
-              disabled={replySubmittingPostId === inlineReplyPostId}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-              aria-label="送信"
-              title="送信"
-            >
-              ↑
-            </button>
-          ) : null}
-        </form>
+        <InlineReplyForm
+          inlineReplyPostId={inlineReplyPostId}
+          replyDrafts={replyDrafts}
+          setReplyDrafts={setReplyDrafts}
+          replySubmittingPostId={replySubmittingPostId}
+          posts={posts}
+          repliesByPost={repliesByPost}
+          replyParentReplyId={replyParentReplyId}
+          profileNickname={profileNickname}
+          profileAvatarUrl={profileAvatarUrl}
+          profilePlaceholderHex={profilePlaceholderHex}
+          tryInteraction={tryInteraction}
+          handleReplySubmit={handleReplySubmit}
+        />
       ) : null}
 
       <MustChangePasswordModal
