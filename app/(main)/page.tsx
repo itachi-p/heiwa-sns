@@ -12,7 +12,6 @@ import React, {
 import type { User } from "@supabase/supabase-js";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { setReplyActive } from "@/components/reply-active-bus";
-import { friendlyClientDbMessage } from "@/lib/client-db-error";
 import { AppToastPortal } from "@/components/app-toast-portal";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { MustChangePasswordModal } from "@/components/must-change-password-modal";
@@ -21,6 +20,7 @@ import { ComposePostForm } from "@/components/timeline/compose-post-form";
 import { InlineReplyForm } from "@/components/timeline/inline-reply-form";
 import { TimelinePostCard } from "@/components/timeline/post-card";
 import { createClient } from "@/lib/supabase/client";
+import { submitTimelinePost } from "@/lib/timeline-create-post";
 import {
   type TimelinePost as Post,
   type TimelinePostReply as PostReply,
@@ -32,10 +32,7 @@ import {
   fetchToxicityOverThresholdBehavior,
   fetchToxicityFilterLevel,
 } from "@/lib/timeline-threshold";
-import {
-  POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
-  REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE,
-} from "@/lib/visibility-notice";
+import { REPLY_HIGH_TOXICITY_VISIBILITY_NOTICE } from "@/lib/visibility-notice";
 import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
@@ -57,7 +54,6 @@ import { sortTimelinePosts } from "@/lib/timeline-sort";
 import {
   removePostImageIfAny,
   type PreparedPostImage,
-  uploadPostImage,
 } from "@/lib/post-image-storage";
 import {
   POST_DEV_SCORES_KEY,
@@ -1449,199 +1445,24 @@ export default function Home() {
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!userId) {
-      return;
-    }
-    if (needsNickname || needsPasswordChange || needsInviteOnboarding)
-      return;
-    const textContent = input.trim();
-    if (!textContent && !composePostImage) {
-      setToast({ message: "投稿内容を入力してください。", tone: "error" });
-      return;
-    }
-    if (!textContent && composePostImage) {
-      const msg = "画像を添付する場合は本文を入力してください。";
-      setToast({ message: msg, tone: "error" });
-      return;
-    }
-    if (textContent.length > POST_AND_REPLY_MAX_CHARS) {
-      const msg = `投稿は${POST_AND_REPLY_MAX_CHARS}文字以内にしてください。`;
-      setToast({ message: msg, tone: "error" });
-      return;
-    }
-
-    setPostSubmitting(true);
-
-    let postOverallMax = 0;
-    let postScores: Record<string, number> = {};
-
-    if (textContent) {
-      try {
-        const res = await fetch("/api/moderate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            text: textContent,
-            mode: moderationMode,
-          }),
-        });
-        const json = (await res.json()) as {
-          error?: string;
-          overallMax?: number;
-          mode?: "auto" | "mock" | "perspective";
-          truncated?: boolean;
-          paragraphs?: Array<{
-            index: number;
-            text: string;
-            maxScore: number;
-            scores: Record<string, number>;
-          }>;
-          degraded?: boolean;
-          degradedReason?: string;
-        };
-        if (!res.ok) {
-          setToast({
-            message:
-              json.error ??
-              "投稿チェックに失敗しました。時間をおいて再試行してください。",
-            tone: "error",
-          });
-          setPostSubmitting(false);
-          return;
-        }
-        if (json.degraded) {
-          setModerationDegradedMessage(
-            json.degradedReason ??
-              "APIの利用制限などにより、簡易チェックに切り替えました。"
-          );
-        } else {
-          setModerationDegradedMessage(null);
-        }
-        postScores = normalizePerspectiveScores(
-          json.paragraphs?.[0]?.scores as Record<string, unknown> | undefined
-        );
-        let maxFromApi =
-          typeof json.overallMax === "number" ? json.overallMax : 0;
-        if (maxFromApi === 0 && Object.keys(postScores).length > 0) {
-          maxFromApi = Math.max(...Object.values(postScores));
-        }
-        postOverallMax = maxFromApi;
-      } catch (err) {
-        console.error("moderation error:", err);
-        setToast({
-          message:
-            "投稿チェックに失敗しました。通信状況をご確認のうえ再試行してください。",
-          tone: "error",
-        });
-        setPostSubmitting(false);
-        return;
-      }
-    }
-
-    const { data: sessionWrap, error: sessionReadErr } =
-      await supabase.auth.getSession();
-    if (sessionReadErr) {
-      console.error("getSession error:", sessionReadErr);
-    }
-    const sessionUser = sessionWrap.session?.user;
-    if (!sessionUser?.id) {
-      setToast({
-        message: "セッションが切れました。再度ログインしてください。",
-        tone: "error",
-      });
-      setPostSubmitting(false);
-      return;
-    }
-    const authorId = sessionUser.id;
-    if (authorId !== userId) {
-      setUser(sessionUser);
-    }
-
-    const { data, error } = await supabase
-      .from("posts")
-      .insert({
-        content: textContent,
-        user_id: authorId,
-        moderation_max_score: postOverallMax,
-        moderation_dev_scores:
-          Object.keys(postScores).length > 0
-            ? { first: postScores }
-            : null,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("insert error:", error);
-      setToast({
-        message: friendlyClientDbMessage(error.message),
-        tone: "error",
-      });
-      setPostSubmitting(false);
-      return;
-    }
-
-    if (!data) {
-      setToast({
-        message: "投稿の保存結果が取得できませんでした。再試行してください。",
-        tone: "error",
-      });
-      setPostSubmitting(false);
-      return;
-    }
-
-    if (composePostImage) {
-      const up = await uploadPostImage(
-        supabase,
-        authorId,
-        data.id,
-        composePostImage
-      );
-      if (!up.ok) {
-        await supabase.from("posts").delete().eq("id", data.id);
-        setToast({
-          message:
-            "画像のアップロードに失敗しました。形式や容量をご確認ください。",
-          tone: "error",
-        });
-        setPostSubmitting(false);
-        return;
-      }
-      const { error: updErr } = await supabase
-        .from("posts")
-        .update({ image_storage_path: up.path })
-        .eq("id", data.id)
-        .eq("user_id", authorId);
-      if (updErr) {
-        await removePostImageIfAny(supabase, up.path);
-        await supabase.from("posts").delete().eq("id", data.id);
-        setToast({
-          message: friendlyClientDbMessage(updErr.message),
-          tone: "error",
-        });
-        setPostSubmitting(false);
-        return;
-      }
-    }
-
-    markPostNeedsSecondModeration(data.id);
-    if (Object.keys(postScores).length > 0) {
-      setPostScoresById((prev) => ({
-        ...prev,
-        [data.id]: { first: postScores },
-      }));
-    }
-    setInput("");
-    setComposePostImage(null);
-    setComposeOpen(false);
-    if (postOverallMax >= HIGH_TOXICITY_AUTHOR_NOTICE_THRESHOLD) {
-      setToast({
-        message: POST_HIGH_TOXICITY_VISIBILITY_NOTICE,
-        tone: "default",
-      });
-    }
-    await fetchPosts({ quiet: true });
-    setPostSubmitting(false);
+    if (!userId) return;
+    if (needsNickname || needsPasswordChange || needsInviteOnboarding) return;
+    await submitTimelinePost({
+      input,
+      userId,
+      composePostImage,
+      moderationMode,
+      supabase,
+      setToast,
+      setPostSubmitting,
+      setModerationDegradedMessage,
+      setPostScoresById,
+      setInput,
+      setComposePostImage,
+      setComposeOpen,
+      setUser,
+      refetchPosts: () => fetchPosts({ quiet: true }),
+    });
   };
 
   const handleLike = async (postId: number) => {
