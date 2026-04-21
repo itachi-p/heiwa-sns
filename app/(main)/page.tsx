@@ -22,6 +22,10 @@ import { TimelinePostCard } from "@/components/timeline/post-card";
 import { createClient } from "@/lib/supabase/client";
 import { submitTimelinePost } from "@/lib/timeline-create-post";
 import { submitTimelineReply } from "@/lib/timeline-submit-reply";
+import {
+  loadRepliesForPosts,
+  loadTimelinePostsPage,
+} from "@/lib/timeline-fetch";
 import { useSecondModerationLoop } from "@/hooks/use-second-moderation-loop";
 import {
   type TimelinePost as Post,
@@ -29,17 +33,14 @@ import {
   type TimelineToastState as ToastState,
 } from "@/lib/timeline-types";
 import {
-  ANON_TOXICITY_VIEW_THRESHOLD,
   fetchToxicityOverThresholdBehavior,
   fetchToxicityFilterLevel,
 } from "@/lib/timeline-threshold";
 import {
   DEFAULT_TOXICITY_FILTER_LEVEL,
   DEFAULT_TOXICITY_OVER_THRESHOLD_BEHAVIOR,
-  effectiveScoreForViewerToxicityFilter,
   parseToxicityFilterLevel,
   parseToxicityOverThresholdBehavior,
-  thresholdForLevel,
   type ToxicityOverThresholdBehavior,
   type ToxicityFilterLevel,
 } from "@/lib/toxicity-filter-level";
@@ -49,7 +50,6 @@ import {
   resolvePendingVisibleContent,
 } from "@/lib/post-edit-window";
 import { partitionRepliesByParent } from "@/lib/reply-tree";
-import { sortTimelinePosts } from "@/lib/timeline-sort";
 import {
   removePostImageIfAny,
   type PreparedPostImage,
@@ -81,37 +81,8 @@ import {
 
 const supabase = createClient();
 
-const RELATION_PENALTY_WINDOW_DAYS = 14;
 const TIMELINE_PAGE_SIZE = 20;
 const TIMELINE_SNAPSHOT_KEY = "timeline_snapshot_v1";
-
-async function fetchPublicProfilesByIds(userIds: string[]) {
-  if (userIds.length === 0) return [] as Array<{
-    id: string;
-    nickname: string | null;
-    avatar_url?: string | null;
-    avatar_placeholder_hex?: string | null;
-    public_id?: string | null;
-  }>;
-  const res = await fetch("/api/public-profiles", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ userIds }),
-  });
-  if (!res.ok) return [];
-  const json = (await res.json().catch(() => null)) as
-    | {
-        profiles?: Array<{
-          id: string;
-          nickname: string | null;
-          avatar_url?: string | null;
-          avatar_placeholder_hex?: string | null;
-          public_id?: string | null;
-        }>;
-      }
-    | null;
-  return Array.isArray(json?.profiles) ? json.profiles : [];
-}
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -410,283 +381,80 @@ export default function Home() {
       setTimelineOffset(0);
     }
     try {
-    if (userId && !append) {
-      // 表示を優先し、重い確定処理はバックグラウンドで走らせる。
-      void fetch("/api/finalize-my-pending", {
-        method: "POST",
-        credentials: "same-origin",
-      }).catch(() => {
-        /* 確定 API が失敗しても一覧取得は続行 */
+      if (userId && !append) {
+        // 表示を優先し、重い確定処理はバックグラウンドで走らせる。
+        void fetch("/api/finalize-my-pending", {
+          method: "POST",
+          credentials: "same-origin",
+        }).catch(() => {
+          /* 確定 API が失敗しても一覧取得は続行 */
+        });
+      }
+
+      const postsRes = await loadTimelinePostsPage({
+        supabase,
+        start: append ? timelineOffset : 0,
+        pageSize: TIMELINE_PAGE_SIZE,
+        userId,
+        toxicityFilterLevel,
+        toxicityOverThresholdBehavior,
+        append,
+        existingPosts: posts,
       });
-    }
-    const start = append ? timelineOffset : 0;
-    const end = start + TIMELINE_PAGE_SIZE - 1;
-    const { data: rows, error } = await supabase
-      .from("posts")
-      .select("*")
-      .range(start, end)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      setErrorMessage(error.message);
-      return;
-    }
-
-    const pageRows = (rows ?? []) as Post[];
-    setTimelineHasMore(pageRows.length === TIMELINE_PAGE_SIZE);
-    setTimelineOffset(start + pageRows.length);
-    const list = append
-      ? ([
-          ...posts,
-          ...pageRows.filter((r) => !posts.some((p) => p.id === r.id)),
-        ] as Post[])
-      : pageRows;
-    const authorIds = [
-      ...new Set(
-        list
-          .map((p) => p.user_id)
-          .filter((id): id is string => Boolean(id))
-      ),
-    ];
-
-    const profileByUserId = new Map<
-      string,
-      {
-        nickname: string | null;
-        avatar_url: string | null;
-        avatar_placeholder_hex: string | null;
-        public_id: string | null;
-      }
-    >();
-    const profilePromise = authorIds.length > 0
-      ? supabase
-          .from("users")
-          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
-          .in("id", authorIds)
-      : Promise.resolve({ data: null, error: null });
-
-    const relationPromise = userId
-      ? (() => {
-          const since = new Date(
-            Date.now() - RELATION_PENALTY_WINDOW_DAYS * 24 * 60 * 60 * 1000
-          ).toISOString();
-          return supabase
-            .from("reply_toxic_events")
-            .select("actor_user_id, max_score")
-            .eq("target_user_id", userId)
-            .gte("created_at", since);
-        })()
-      : Promise.resolve({ data: null, error: null });
-
-    const affinityPromise = userId
-      ? supabase
-          .from("user_affinity")
-          .select("to_user_id, like_score")
-          .eq("from_user_id", userId)
-      : Promise.resolve({ data: null, error: null });
-
-    const [
-      { data: profiles, error: profileError },
-      { data: evRows, error: evErr },
-      { data: affRows, error: affErr },
-    ] = await Promise.all([profilePromise, relationPromise, affinityPromise]);
-
-    const fallbackProfiles =
-      profileError != null ? await fetchPublicProfilesByIds(authorIds) : [];
-    for (const row of (profileError ? fallbackProfiles : profiles ?? [])) {
-      profileByUserId.set(row.id, {
-        nickname: row.nickname,
-        avatar_url: row.avatar_url ?? null,
-        avatar_placeholder_hex:
-          (row as { avatar_placeholder_hex?: string | null })
-            .avatar_placeholder_hex ?? null,
-        public_id:
-          typeof (row as { public_id?: string | null }).public_id === "string"
-            ? String(
-                (row as { public_id?: string | null }).public_id
-              ).trim() || null
-            : null,
-      });
-    }
-
-    const merged: Post[] = list.map((p) => ({
-      ...p,
-      users: {
-        nickname: p.user_id
-          ? (profileByUserId.get(p.user_id)?.nickname ?? null)
-          : null,
-        avatar_url: p.user_id
-          ? (profileByUserId.get(p.user_id)?.avatar_url ?? null)
-          : null,
-        avatar_placeholder_hex: p.user_id
-          ? (profileByUserId.get(p.user_id)?.avatar_placeholder_hex ?? null)
-          : null,
-        public_id: p.user_id
-          ? (profileByUserId.get(p.user_id)?.public_id ?? null)
-          : null,
-      },
-    }));
-
-    const relationMultiplierByAuthor = new Map<string, number>();
-    if (userId && !evErr) {
-      for (const row of evRows ?? []) {
-        const actor = row.actor_user_id as string;
-        const m = Math.max(0.5, Math.min(0.8, 1 - Number(row.max_score ?? 0)));
-        relationMultiplierByAuthor.set(
-          actor,
-          Math.min(relationMultiplierByAuthor.get(actor) ?? 1, m)
-        );
-      }
-    }
-
-    const affinityLikeScoreByAuthor = new Map<string, number>();
-    if (userId && !affErr) {
-      for (const row of affRows ?? []) {
-        const toId = row.to_user_id as string;
-        affinityLikeScoreByAuthor.set(
-          toId,
-          typeof row.like_score === "number" ? row.like_score : 0
-        );
-      }
-    }
-
-    const viewThreshold = userId
-      ? thresholdForLevel(toxicityFilterLevel)
-      : ANON_TOXICITY_VIEW_THRESHOLD;
-
-    const visibleForTimeline =
-      toxicityOverThresholdBehavior === "hide"
-        ? merged.filter((p) => {
-            const score = effectiveScoreForViewerToxicityFilter(
-              p.moderation_max_score
-            );
-            if (userId && p.user_id === userId) return true;
-            return score <= viewThreshold;
-          })
-        : merged;
-
-    const timelinePosts = sortTimelinePosts(
-      visibleForTimeline,
-      userId,
-      affinityLikeScoreByAuthor,
-      relationMultiplierByAuthor
-    );
-
-    setPosts(timelinePosts);
-    // 投稿本文を先に描画させるため、返信・スコアの取得を待たずにローディング解除。
-    // 返信件数などは取得完了後にリアクティブに更新される（初回のみ一瞬 0 件相当の表示に
-    // なりうるが、2 回目以降は sessionStorage snapshot により即座に揃う）。
-    if (!append && !quiet) {
-      setTimelineLoading(false);
-    }
-
-    const postIds = timelinePosts.map((p) => p.id);
-    let replyRowsFlat: PostReply[] = [];
-    let snapshotRepliesByPost: Record<number, PostReply[]> = {};
-    if (postIds.length === 0) {
-      setRepliesByPost({});
-      snapshotRepliesByPost = {};
-    } else {
-      const { data: replyRows, error: replyErr } = await supabase
-        .from("post_replies")
-        .select("*")
-        .in("post_id", postIds)
-        .order("created_at", { ascending: true });
-
-      if (replyErr) {
-        setErrorMessage(replyErr.message);
+      if (!postsRes.ok) {
+        setErrorMessage(postsRes.error);
         return;
       }
+      const { posts: timelinePosts, hasMore, nextOffset } = postsRes;
+      setTimelineHasMore(hasMore);
+      setTimelineOffset(nextOffset);
+      setPosts(timelinePosts);
 
-      const rlist = (replyRows ?? []) as Array<{
-        id: number;
-        post_id: number;
-        user_id: string;
-        content: string;
-        pending_content?: string | null;
-        created_at?: string;
-        parent_reply_id?: number | null;
-      }>;
-      const replyAuthorIds = [
-        ...new Set(rlist.map((r) => r.user_id).filter(Boolean)),
-      ];
-      const replyProfileByUserId = new Map<
-        string,
-        {
-          nickname: string | null;
-          avatar_url: string | null;
-          avatar_placeholder_hex: string | null;
-          public_id: string | null;
-        }
-      >();
-      if (replyAuthorIds.length > 0) {
-        const { data: rprofiles, error: rpe } = await supabase
-          .from("users")
-          .select("id, nickname, avatar_url, avatar_placeholder_hex, public_id")
-          .in("id", replyAuthorIds);
-        const fallbackReplyProfiles =
-          rpe != null ? await fetchPublicProfilesByIds(replyAuthorIds) : [];
-        for (const row of (rpe ? fallbackReplyProfiles : rprofiles ?? [])) {
-          replyProfileByUserId.set(row.id, {
-            nickname: row.nickname,
-            avatar_url: row.avatar_url ?? null,
-            avatar_placeholder_hex:
-              (row as { avatar_placeholder_hex?: string | null })
-                .avatar_placeholder_hex ?? null,
-            public_id:
-              typeof (row as { public_id?: string | null }).public_id ===
-              "string"
-                ? String(
-                    (row as { public_id?: string | null }).public_id
-                  ).trim() || null
-                : null,
-          });
-        }
+      // 投稿本文を先に描画させるため、返信・スコアの取得を待たずにローディング解除。
+      // 返信件数などは取得完了後にリアクティブに更新される（初回のみ一瞬 0 件相当の表示に
+      // なりうるが、2 回目以降は sessionStorage snapshot により即座に揃う）。
+      if (!append && !quiet) {
+        setTimelineLoading(false);
       }
 
-      const byPost: Record<number, PostReply[]> = {};
-      for (const r of rlist) {
-        const arr = byPost[r.post_id] ?? [];
-        const rp = replyProfileByUserId.get(r.user_id);
-        arr.push({
-          ...r,
-          users: {
-            nickname: rp?.nickname ?? null,
-            avatar_url: rp?.avatar_url ?? null,
-            avatar_placeholder_hex: rp?.avatar_placeholder_hex ?? null,
-            public_id: rp?.public_id ?? null,
-          },
-        });
-        byPost[r.post_id] = arr;
+      const repliesRes = await loadRepliesForPosts({
+        supabase,
+        postIds: timelinePosts.map((p) => p.id),
+      });
+      if (!repliesRes.ok) {
+        setErrorMessage(repliesRes.error);
+        return;
       }
-      setRepliesByPost(byPost);
-      snapshotRepliesByPost = byPost;
-      replyRowsFlat = Object.values(byPost).flat();
-    }
+      const snapshotRepliesByPost = repliesRes.byPost;
+      const replyRowsFlat: PostReply[] = Object.values(
+        snapshotRepliesByPost
+      ).flat();
+      setRepliesByPost(snapshotRepliesByPost);
 
-    const postScoresFromDb = buildDevScoresByIdFromRows(timelinePosts);
-    const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
-    setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
-    setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
-    for (const pid of loadPostIdsPendingSecondModeration()) {
-      if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
-    }
-    for (const rid of loadReplyIdsPendingSecondModeration()) {
-      if (replyScoresFromDb[rid]?.second) removeReplyNeedsSecondModeration(rid);
-    }
+      const postScoresFromDb = buildDevScoresByIdFromRows(timelinePosts);
+      const replyScoresFromDb = buildDevScoresByIdFromRows(replyRowsFlat);
+      setPostScoresById((prev) => mergeDevScoresById(prev, postScoresFromDb));
+      setReplyScoresById((prev) => mergeDevScoresById(prev, replyScoresFromDb));
+      for (const pid of loadPostIdsPendingSecondModeration()) {
+        if (postScoresFromDb[pid]?.second) removePostNeedsSecondModeration(pid);
+      }
+      for (const rid of loadReplyIdsPendingSecondModeration()) {
+        if (replyScoresFromDb[rid]?.second)
+          removeReplyNeedsSecondModeration(rid);
+      }
 
-    setErrorMessage(null);
-    try {
-      window.sessionStorage.setItem(
-        TIMELINE_SNAPSHOT_KEY,
-        JSON.stringify({
-          posts: timelinePosts,
-          repliesByPost: snapshotRepliesByPost,
-        })
-      );
-    } catch {
-      // Storage can fail in private mode/quota limits; non-fatal.
-    }
+      setErrorMessage(null);
+      try {
+        window.sessionStorage.setItem(
+          TIMELINE_SNAPSHOT_KEY,
+          JSON.stringify({
+            posts: timelinePosts,
+            repliesByPost: snapshotRepliesByPost,
+          })
+        );
+      } catch {
+        // Storage can fail in private mode/quota limits; non-fatal.
+      }
     } finally {
       setTimelineLoading(false);
       setTimelineLoadingMore(false);
