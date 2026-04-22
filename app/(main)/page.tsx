@@ -1220,6 +1220,10 @@ export default function Home() {
           profilePlaceholderHex={profilePlaceholderHex}
           tryInteraction={tryInteraction}
           handleReplySubmit={handleReplySubmit}
+          onClose={() => {
+            setInlineReplyPostId(null);
+            setReplyParentReplyId(null);
+          }}
         />
       ) : null}
 

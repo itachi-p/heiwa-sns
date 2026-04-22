@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { AutosizeTextarea } from "@/components/autosize-textarea";
 import { UserAvatar } from "@/components/user-avatar";
@@ -22,6 +22,7 @@ export type InlineReplyFormProps = {
   profilePlaceholderHex: string | null;
   tryInteraction: () => boolean;
   handleReplySubmit: (postId: number) => void | Promise<void>;
+  onClose: () => void;
 };
 
 /**
@@ -43,9 +44,11 @@ export function InlineReplyForm(props: InlineReplyFormProps) {
     profilePlaceholderHex,
     tryInteraction,
     handleReplySubmit,
+    onClose,
   } = props;
 
-  const placeholder = (() => {
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const targetMeta = useMemo(() => {
     const post = posts.find((p) => p.id === inlineReplyPostId);
     const targetReply =
       replyParentReplyId != null
@@ -64,8 +67,32 @@ export function InlineReplyForm(props: InlineReplyFormProps) {
         );
     const pid =
       targetReply?.users?.public_id ?? post?.users?.public_id ?? "ID未設定";
-    return `${n}（${pid}）に返信`;
-  })();
+    const base = (targetReply?.content ?? post?.content ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const preview = base.length > 20 ? `${base.slice(0, 20)}…` : base;
+    return {
+      placeholder: `${n}（${pid}）に返信`,
+      guideName: n,
+      guidePreview: preview || "（本文なし）",
+    };
+  }, [inlineReplyPostId, posts, repliesByPost, replyParentReplyId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKeyboardInset(inset);
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   return (
     <form
@@ -74,28 +101,44 @@ export function InlineReplyForm(props: InlineReplyFormProps) {
         if (!tryInteraction()) return;
         void handleReplySubmit(inlineReplyPostId);
       }}
-      className="fixed inset-x-2 bottom-2 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] shadow-lg"
+      className="fixed inset-x-2 z-[56] rounded-2xl border border-gray-200 bg-white p-2 shadow-lg"
+      style={{
+        bottom: `calc(0.5rem + env(safe-area-inset-bottom, 0px) + ${keyboardInset}px)`,
+      }}
     >
-      <UserAvatar
-        name={profileNickname}
-        avatarUrl={profileAvatarUrl}
-        placeholderHex={profilePlaceholderHex}
-        size="sm"
-      />
-      <AutosizeTextarea
-        value={replyDrafts[inlineReplyPostId] ?? ""}
-        onChange={(e) =>
-          setReplyDrafts((prev) => ({
-            ...prev,
-            [inlineReplyPostId]: e.target.value,
-          }))
-        }
-        placeholder={placeholder}
-        maxRows={4}
-        maxLength={POST_AND_REPLY_MAX_CHARS}
-        disabled={replySubmittingPostId === inlineReplyPostId}
-        className="min-h-[2.2rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-      />
+      <div className="mb-2 truncate rounded-xl bg-gray-50 px-3 py-1.5 text-xs text-gray-600">
+        {targetMeta.guideName} / {targetMeta.guidePreview}
+      </div>
+      <div className="flex items-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+          aria-label="返信を閉じる"
+          title="返信を閉じる"
+        >
+          ×
+        </button>
+        <UserAvatar
+          name={profileNickname}
+          avatarUrl={profileAvatarUrl}
+          placeholderHex={profilePlaceholderHex}
+          size="sm"
+        />
+        <AutosizeTextarea
+          value={replyDrafts[inlineReplyPostId] ?? ""}
+          onChange={(e) =>
+            setReplyDrafts((prev) => ({
+              ...prev,
+              [inlineReplyPostId]: e.target.value,
+            }))
+          }
+          placeholder={targetMeta.placeholder}
+          maxRows={4}
+          maxLength={POST_AND_REPLY_MAX_CHARS}
+          disabled={replySubmittingPostId === inlineReplyPostId}
+          className="min-h-[2.4rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
+        />
       {(replyDrafts[inlineReplyPostId] ?? "").trim().length > 0 ? (
         <button
           type="submit"
@@ -107,6 +150,7 @@ export function InlineReplyForm(props: InlineReplyFormProps) {
           ↑
         </button>
       ) : null}
+      </div>
     </form>
   );
 }

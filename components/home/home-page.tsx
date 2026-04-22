@@ -61,6 +61,7 @@ import {
 import { validateNicknameOptional } from "@/lib/nickname";
 import { COMPOSE_OPEN_EVENT } from "@/components/compose-open-bus";
 import { AppToastPortal } from "@/components/app-toast-portal";
+import { InlineReplyForm } from "@/components/timeline/inline-reply-form";
 import { VIEWER_TOXICITY_UPDATED_EVENT } from "@/components/viewer-toxicity-bus";
 import { sanitizeExternalProfileUrl } from "@/lib/sanitize-external-url";
 import {
@@ -2665,65 +2666,24 @@ export default function HomePage() {
       </div>
 
       {canInteract && inlineReplyPostId != null ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!tryInteraction()) return;
-            void handleReplySubmit(inlineReplyPostId);
+        <InlineReplyForm
+          inlineReplyPostId={inlineReplyPostId}
+          replyDrafts={replyDrafts}
+          setReplyDrafts={setReplyDrafts}
+          replySubmittingPostId={replySubmittingPostId}
+          posts={posts}
+          repliesByPost={repliesByPost}
+          replyParentReplyId={replyParentReplyId}
+          profileNickname={profileNickname}
+          profileAvatarUrl={profileAvatarUrl}
+          profilePlaceholderHex={profilePlaceholderHex}
+          tryInteraction={tryInteraction}
+          handleReplySubmit={handleReplySubmit}
+          onClose={() => {
+            setInlineReplyPostId(null);
+            setReplyParentReplyId(null);
           }}
-          className="fixed inset-x-2 bottom-2 z-[56] flex items-end gap-2 rounded-2xl border border-gray-200 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] shadow-lg"
-        >
-          <UserAvatar
-            name={profileNickname}
-            avatarUrl={profileAvatarUrl}
-            placeholderHex={profilePlaceholderHex}
-            size="sm"
-          />
-          <AutosizeTextarea
-            value={replyDrafts[inlineReplyPostId] ?? ""}
-            onChange={(e) =>
-              setReplyDrafts((prev) => ({
-                ...prev,
-                [inlineReplyPostId]: e.target.value,
-              }))
-            }
-            placeholder={(() => {
-              const post = posts.find((p) => p.id === inlineReplyPostId);
-              const targetReply =
-                replyParentReplyId != null
-                  ? (repliesByPost[inlineReplyPostId] ?? []).find(
-                      (r) => r.id === replyParentReplyId
-                    )
-                  : null;
-              const n = targetReply
-                ? displayName(
-                    targetReply.users?.nickname,
-                    targetReply.users?.public_id
-                  )
-                : displayName(post?.users?.nickname, post?.users?.public_id);
-              const pid =
-                targetReply?.users?.public_id ??
-                post?.users?.public_id ??
-                "ID未設定";
-              return `${n}（${pid}）に返信`;
-            })()}
-            maxRows={4}
-            maxLength={POST_AND_REPLY_MAX_CHARS}
-            disabled={replySubmittingPostId === inlineReplyPostId}
-            className="min-h-[2.2rem] min-w-0 flex-1 resize-none overflow-hidden rounded-2xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 disabled:opacity-60"
-          />
-          {(replyDrafts[inlineReplyPostId] ?? "").trim().length > 0 ? (
-            <button
-              type="submit"
-              disabled={replySubmittingPostId === inlineReplyPostId}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-              aria-label="送信"
-              title="送信"
-            >
-              ↑
-            </button>
-          ) : null}
-        </form>
+        />
       ) : null}
 
       <MustChangePasswordModal
