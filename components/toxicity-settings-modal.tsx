@@ -149,11 +149,25 @@ export function ToxicitySettingsModal({ open, onClose }: Props) {
                 aria-valuemax={3}
                 aria-valuenow={levelIndex}
               />
-              <div className="mt-1.5 flex justify-between gap-0.5 text-[10px] text-gray-500">
-                <span className="min-w-0 text-center">厳</span>
-                <span className="min-w-0 text-center">やや厳</span>
-                <span className="min-w-0 text-center">標準</span>
-                <span className="min-w-0 text-center">オフ</span>
+              <div className="mt-1.5 flex justify-between gap-0.5 text-[10px]">
+                {[
+                  { key: "strict", label: "厳" },
+                  { key: "soft", label: "やや厳" },
+                  { key: "normal", label: "標準" },
+                  { key: "off", label: "オフ" },
+                ].map((item) => (
+                  <span
+                    key={item.key}
+                    className={[
+                      "min-w-0 text-center transition-colors",
+                      level === item.key
+                        ? "font-semibold text-gray-900"
+                        : "font-normal text-gray-500",
+                    ].join(" ")}
+                  >
+                    {item.label}
+                  </span>
+                ))}
               </div>
             </div>
           </section>
